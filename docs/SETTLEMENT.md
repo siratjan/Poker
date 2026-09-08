@@ -154,7 +154,10 @@ Kasse hat Überschuss). Der Admin muss beim Abschluss ohnehin kommentieren.
    `Σ transfers.amount == Σ positive residual`.
 4. Kein Spieler erhält aus der Kasse mehr als seinen `claim`.
 5. Ein Bar-Zahler mit `stack ≥ cashIn` und `payout == 0` erhält mindestens `cashIn` bar,
-   sofern kein Listen-Spieler vorher `payout` entnommen hat.
+   sofern kein Spieler mehr `payout` entnommen hat, als er selbst bar eingezahlt hat
+   (`payout_j ≤ cashIn_j` für alle j). Dann gilt `box ≥ Σ want1`, und Stufe 1 wird voll bedient.
+   Entnimmt jemand mehr (egal ob Bar- oder Listen-Spieler), wird Stufe 1 anteilig gekürzt und
+   der Fehlbetrag landet als Überweisung von den Listen-Schuldnern an den gekürzten Bar-Zahler.
 6. Solange ein Bar-Zahler einen offenen Anspruch hat, erhält kein Listen-Spieler Bargeld:
    `Σ cashTier3 > 0 ⇒ alle want2 vollständig bedient`.
 7. Determinismus: gleiche Eingabe → identische Ausgabe. Permutation der Eingabe ändert nach
