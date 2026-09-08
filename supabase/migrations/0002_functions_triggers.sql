@@ -147,7 +147,25 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  -- set by sync_auth_user_profile() (migration 0005) and by nothing else
+  v_profile_sync boolean := coalesce(current_setting('app.profile_sync', true), 'off') = 'on';
 begin
+  -- SPEC 3: "Anzeigename und Avatar werden bei jedem Login aus dem
+  -- Google-Profil aktualisiert. Die Rolle bleibt davon unberührt."
+  -- That path may write display_name/avatar_url — and nothing else.
+  if v_profile_sync then
+    if new.id is distinct from old.id
+       or new.email is distinct from old.email
+       or new.role is distinct from old.role
+       or new.created_at is distinct from old.created_at then
+      raise exception 'FORBIDDEN' using errcode = 'P0001',
+        detail = 'profile sync may only touch display_name and avatar_url';
+    end if;
+
+    return new;
+  end if;
+
   if auth.uid() is null then
     return new;
   end if;
@@ -177,7 +195,17 @@ create trigger protect_app_user_columns_trg
 -- Who recorded this? (SPEC 4: "immer mit Zeitstempel und erfassendem Nutzer")
 -- The column has `default auth.uid()`, but a client may still send a value of
 -- its own; on INSERT this trigger overwrites it, so the recorder shown in the
--- history is always the authenticated caller. UPDATE never touches created_by.
+-- history is always the authenticated caller.
+--
+-- WP2 (Gaby WP1 finding F11): on UPDATE the recorder must not move either.
+-- Without this, an editor could PATCH players.created_by / entries.created_by
+-- of an existing row onto a different user and the history in WP5 would show a
+-- stranger. `sessions` has the same rule in validate_session_update
+-- (IMMUTABLE_FIELD), `session_players` has no update policy at all, so these
+-- two tables were the last gap. The old values are restored silently instead of
+-- raising: the column is not something the app ever sends on purpose, and a new
+-- error code would need a German message it never gets to show.
+--
 -- auth.uid() is null in the SQL editor / seed — that path keeps the given value
 -- so the planner can bootstrap rows by hand (same rule as
 -- protect_app_user_columns above).
@@ -190,6 +218,19 @@ set search_path = public
 as $$
 begin
   if auth.uid() is null then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if tg_table_name in ('players', 'entries') then
+      -- who created the row, and when, is part of its history: never editable
+      new.created_by := old.created_by;
+      new.created_at := old.created_at;
+    elsif tg_table_name = 'settings' then
+      -- settings.updated_by means "who changed it last"
+      new.updated_by := auth.uid();
+    end if;
+
     return new;
   end if;
 
@@ -209,9 +250,10 @@ begin
 end;
 $$;
 
+-- insert: stamp the actor. update: keep created_by/created_at (F11).
 drop trigger if exists stamp_players on public.players;
 create trigger stamp_players
-  before insert on public.players
+  before insert or update on public.players
   for each row execute function public.stamp_actor();
 
 drop trigger if exists stamp_sessions on public.sessions;
@@ -224,9 +266,10 @@ create trigger stamp_session_players
   before insert on public.session_players
   for each row execute function public.stamp_actor();
 
+-- insert: stamp the actor. update: keep created_by/created_at (F11).
 drop trigger if exists stamp_entries on public.entries;
 create trigger stamp_entries
-  before insert on public.entries
+  before insert or update on public.entries
   for each row execute function public.stamp_actor();
 
 -- settings.updated_by is an "who changed it last", so it is stamped on update too
