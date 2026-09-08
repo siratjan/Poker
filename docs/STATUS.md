@@ -4,7 +4,7 @@
 |---|---|---|---|---|---|
 | WP0 | Projekt-Setup | 49bc81f | FREIGEGEBEN (Runde 2) | abgenommen, Browser geprüft | 2026-09-08 |
 | WP1 | Datenbank | 05d4197 | FREIGEGEBEN (Runde 2, 1 Minor → WP2) | Push in DB ausstehend | 2026-09-08 |
-| WP2 | Auth + Rollen | – | – | – | – |
+| WP2 | Auth + Rollen | 4de9bd1 | FREIGEGEBEN (4 Minor) + Planer-Finding, Runde 2 läuft | Browser: Redirects ok, Provider-Fehler roh | 2026-09-08 |
 | WP3 | Abrechnungs-Algorithmus | 9087f54 | FREIGEGEBEN (Runde 2) | abgenommen | 2026-09-08 |
 | WP4 | Spieler + Session-Liste | – | – | – | – |
 | WP5 | Session-Detail | – | – | – | – |
