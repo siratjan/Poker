@@ -106,3 +106,94 @@ vor der Implementierung von Hand nachgerechnet; kein einziger Wert weicht ab.
   speichern, damit ein späterer Algorithmus-Wechsel nachvollziehbar bleibt.
 - `describeTransfer` fällt bei unbekannter `playerId` auf „Unbekannt“ zurück; falls die UI dort
   lieber gar keine Zeile zeigt, in WP6 vorher filtern.
+
+---
+
+## Runde 2 (Nacharbeit zu `qa/reports/WP3-gaby.md`, 08.09.2026)
+
+Grundlage: Gabys Report (FREIGEGEBEN, 6 Minor) und die Planer-Entscheidungen. Basis war
+`main` @ `271c4e1` (WP3 gemerged). `docs/SETTLEMENT.md` habe ich nur gelesen, nicht geändert.
+
+| Finding | Was geändert |
+|---|---|
+| F1 | Erledigt durch den Merge nach `main`; nichts zu tun. |
+| F2 | Die überholten Kommentare zur alten Invariante 5 („one cent too weak“, „Counterexample to the literal wording“) in `settlement.property.test.ts` und `settlement.test.ts` beschreiben jetzt die präzisierte Fassung (`payout_j ≤ cashIn_j` für alle j). Assertions unverändert. |
+| F3 | `SettlementResult` hat jetzt `uncoveredDebts: number` (Σ verbleibende `debtor.rest` nach dem Greedy), durchgereicht aus `computeTransfers`. TV9b als elfter Eintrag im Tabellen-Test ergänzt, `uncoveredDebts` wird in **allen** Vektoren geprüft. Der irreführende Kommentar in `transfers.ts` („derselbe Betrag ist als `unallocatedCash` sichtbar“) ist korrigiert. |
+| F4 | `transfers.ts` behauptete „minimal number of transfers“ – jetzt „greedy, wenige Überweisungen, deterministisch, bewusst nicht das theoretische Minimum (NP-schwer)“. Gleiche Aussage im README ergänzt. |
+| F5 | `vitest.config.mts`: `coverage.include: ['src/lib/**/*.ts']` plus `exclude: ['src/lib/**/*.test.ts']`. `npm run test:coverage` läuft ohne Parse-Fehler und ohne Stacktrace. |
+| F6 | `position` ist **Pflicht** (`position: number`, kein Fallback auf den Array-Index). Fehlende, nicht-ganzzahlige oder doppelte `position` → `SettlementError` mit neuem Code `INVALID_POSITION` (in `errors.ts` und im README ergänzt). Drei Tests in TV12 decken die drei Fälle ab. |
+
+### Property-Test erweitert (F3)
+
+`checkGeneralInvariants` prüft jetzt zusätzlich die beiden Gleichungen aus Schritt 5 – und
+zwar in **jedem** Property-Test, nicht nur im neuen:
+
+- `discrepancy < 0` → `unallocatedCash + uncoveredDebts == −discrepancy`, `uncoveredClaims == 0`
+- `discrepancy > 0` → `uncoveredClaims == discrepancy`, `unallocatedCash == 0`, `uncoveredDebts == 0`
+- `discrepancy == 0` → alle drei 0
+
+Dazu zwei neue Properties:
+
+- **Gezielte Differenz**: `buildWithDiscrepancy(seed, delta)` legt die Stacks auf
+  `Σ Buy-in + delta`; `delta` kommt aus `fc.oneof` mit je einem Zweig für echt negativ und echt
+  positiv, damit beide Vorzeichen sicher vorkommen (der Test prüft am Ende selbst, dass er beide
+  gesehen hat – ein rein zufälliges `delta` traf `0` praktisch nie und war anfangs flaky).
+- **TV9b verallgemeinert**: reine Listen-Runde mit lauter Stacks 0 → keine Transfers,
+  `unallocatedCash == 0`, `uncoveredDebts == Σ creditIn`.
+
+Je 500 Läufe wie die bestehenden Properties.
+
+### Abweichungen in Runde 2
+
+- **Tie-Break nach `name` und `playerId` entfernt.** Da `position` jetzt als eindeutige
+  Ganzzahl validiert wird, konnten der sekundäre und tertiäre Sortierschlüssel aus
+  `docs/SETTLEMENT.md` („Eingabe“) **nachweislich nie mehr** greifen: ein Gleichstand wird
+  vorher als `INVALID_POSITION` abgelehnt. Der Vergleich ist deshalb `a.position - b.position`.
+  Das Ergebnis ist in jedem erreichbaren Fall identisch; ich habe nur unerreichbaren Code
+  entfernt (er hätte die Branch-Coverage von `index.ts` auf 70 % gedrückt). Der bisherige Test
+  „breaks equal positions by name, then by playerId“ ist entsprechend durch den
+  `INVALID_POSITION`-Test ersetzt, „keeps the given array order when no position is set“ durch
+  „sorts by position, not by the array index“. `name` bleibt als optionales Feld erhalten
+  (Aufrufer und Tests setzen es), wird aber vom Algorithmus nicht mehr gelesen. **Siehe offene
+  Frage 3.**
+- `computeSettlement` sortiert jetzt eine Kopie der Eingabe (`[...participants]`) statt eines
+  Hilfs-Arrays; ein neuer Test hält fest, dass das Eingabe-Array unverändert bleibt.
+- Negative `position` lehne ich **nicht** ab: `docs/SETTLEMENT.md` TV12 nennt nur „fehlende,
+  nicht-ganzzahlige oder doppelte“. Konservativ am Dokument geblieben.
+
+### Offene Fragen an den Planer (Runde 2)
+
+3. **`docs/SETTLEMENT.md`, Abschnitt „Eingabe“** sagt weiterhin „sekundär Name, tertiär
+   `playerId`“. Mit der Pflicht-`position` ist das unerreichbar (siehe Abweichung oben). Soll der
+   Halbsatz gestrichen werden, oder soll `position` doch Gleichstände erlauben dürfen? Ich habe
+   die konservative Variante gewählt: Verhalten unverändert, nur toter Code entfernt.
+4. **F3 hat eine Konsequenz für WP6**, die Gaby schon nennt: `unallocatedCash` erklärt eine
+   negative Differenz nicht allein. Die Anzeige braucht beide Zahlen
+   („Differenz: n € Bargeld ohne Empfänger“ **und** „n € Schuld ohne Gläubiger“). Ich habe in
+   WP3 nichts an der UI gebaut.
+
+### Prüfung (Runde 2)
+
+- `npm run check` (typecheck + lint + test): **grün**, 9 Testdateien / **205 Tests**, 970 ms.
+  Zweiter Lauf identisch (Determinismus).
+- `npm run test:coverage`: **grün, ohne Stacktrace**. `src/lib/settlement` steht auf
+  **100 % Statements / 100 % Branches / 100 % Functions / 100 % Lines** (vorher 92,85 % Branches;
+  die von Gaby genannten offenen Branches `position ?? index` und `name ?? ''` gibt es nicht mehr).
+- `npm run build`: **grün**.
+- `npm ci` **nicht** ausgeführt (Vorgabe des Planers); `package.json` ist unverändert, keine neuen
+  Abhängigkeiten.
+- **Gabys Tests unverändert.** `tests/gaby/settlement.gaby.test.ts` setzt `position` an allen drei
+  Stellen (Helper `participants()` Z. 30, Permutations-Generator Z. 371, Session-Generator Z. 434),
+  bricht durch die Pflicht-`position` also **nicht** – alle 22 Tests laufen weiter grün. Der
+  Rückfall auf „`position` optional, Fehler nur bei Duplikaten“ war damit nicht nötig.
+  `tests/gaby/wp1-schema.gaby.test.ts` habe ich nicht angefasst und nicht committet.
+
+### So prüft man Runde 2
+
+1. `npm run check`, `npm run test:coverage`, `npm run build` – alles grün, Coverage ohne Stacktrace.
+2. `npx vitest run src/lib/settlement/settlement.test.ts -t "TV9b"` – der neue Tabellen-Eintrag.
+3. `npx vitest run src/lib/settlement/settlement.test.ts -t "INVALID_POSITION"` – die drei
+   Positions-Fehlerfälle.
+4. `npx vitest run src/lib/settlement/settlement.property.test.ts` – die beiden Gleichungen aus
+   Schritt 5 laufen in allen vier Properties mit.
+5. `npx vitest run tests/gaby/settlement.gaby.test.ts` – Gabys 22 Tests, unverändert grün.

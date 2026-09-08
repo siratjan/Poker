@@ -14,7 +14,11 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/lib/**'],
+      // Only TypeScript sources: the v8 provider tries to parse everything it
+      // is given, and a README.md in src/lib would end up as a parse error
+      // with a stack trace in the report.
+      include: ['src/lib/**/*.ts'],
+      exclude: ['src/lib/**/*.test.ts'],
     },
   },
 });

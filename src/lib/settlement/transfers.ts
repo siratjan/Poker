@@ -11,8 +11,12 @@ export type TransfersResult = {
   /** Claims that stayed uncovered (only `> 0` when `discrepancy > 0`). */
   uncoveredClaims: number;
   /**
-   * Debts that stayed unassigned (only `> 0` when `discrepancy < 0`). They are
-   * not reported as debt, the same amount is visible as `unallocatedCash`.
+   * Debts that stayed unassigned (only `> 0` when `discrepancy < 0`): the
+   * debtor owes money, but nobody has a matching claim because chips are
+   * missing. They are not reported as a transfer but separately, and they are
+   * *not* the same amount as `unallocatedCash` - together the two explain the
+   * negative discrepancy: `unallocatedCash + uncoveredDebts === -discrepancy`
+   * (`docs/SETTLEMENT.md`, step 5).
    */
   uncoveredDebts: number;
 };
@@ -20,9 +24,11 @@ export type TransfersResult = {
 type Open = { playerId: string; rest: number; index: number };
 
 /**
- * Greedy matching of debtors and creditors with a minimal number of transfers
- * (`docs/SETTLEMENT.md`, step 5): always pair the largest remaining debtor with
- * the largest remaining creditor, ties broken by input order.
+ * Greedy matching of debtors and creditors (`docs/SETTLEMENT.md`, step 5):
+ * always pair the largest remaining debtor with the largest remaining
+ * creditor, ties broken by input order. That yields few transfers and a
+ * deterministic, hand-checkable result - it is deliberately *not* guaranteed
+ * to be the theoretical minimum, which would be NP-hard.
  */
 export function computeTransfers(residuals: readonly Residual[]): TransfersResult {
   const creditors = collect(residuals, (residual) => residual);

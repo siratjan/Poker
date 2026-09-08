@@ -10,7 +10,8 @@ export type SettlementErrorCode =
   | 'PAYOUT_EXCEEDS_CASHBOX'
   | 'NEGATIVE_AMOUNT'
   | 'NON_INTEGER_AMOUNT'
-  | 'DUPLICATE_PLAYER';
+  | 'DUPLICATE_PLAYER'
+  | 'INVALID_POSITION';
 
 /**
  * Thrown when a precondition of `computeSettlement` (or `distribute`) is

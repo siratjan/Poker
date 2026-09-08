@@ -34,6 +34,7 @@ type Vector = {
   discrepancy: number;
   unallocatedCash: number;
   uncoveredClaims: number;
+  uncoveredDebts: number;
   lines: ExpectedLine[];
   transfers: Transfer[];
 };
@@ -67,6 +68,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 10000, cashTier2: 15000, cashTier3: 0, cashFromBox: 25000, residual: 0 },
       { playerId: 'B', cashTier1: 10000, cashTier2: 5000, cashTier3: 0, cashFromBox: 15000, residual: 0 },
@@ -86,6 +88,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'Ali', cashTier1: 10000, cashTier2: 6000, cashTier3: 0, cashFromBox: 16000, residual: 4000 },
       { playerId: 'Ben', cashTier1: 4000, cashTier2: 0, cashTier3: 0, cashFromBox: 4000, residual: 0 },
@@ -104,6 +107,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'Ali', cashTier1: 10000, cashTier2: 5000, cashTier3: 0, cashFromBox: 15000, residual: 10000 },
       { playerId: 'Ben', cashTier1: 5000, cashTier2: 0, cashTier3: 0, cashFromBox: 5000, residual: 0 },
@@ -123,6 +127,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 10000, cashTier2: 10000, cashTier3: 0, cashFromBox: 20000, residual: 10000 },
       { playerId: 'B', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: 0 },
@@ -141,6 +146,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: 0 },
       { playerId: 'B', cashTier1: 5000, cashTier2: 0, cashTier3: 0, cashFromBox: 5000, residual: 0 },
@@ -157,6 +163,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: 10000 },
       { playerId: 'B', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: -10000 },
@@ -173,6 +180,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 10000, cashTier2: 10000, cashTier3: 0, cashFromBox: 20000, residual: 10000 },
       { playerId: 'B', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: 0 },
@@ -193,6 +201,7 @@ const vectors: Vector[] = [
     discrepancy: 0,
     unallocatedCash: 0,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 10000, cashTier2: 6667, cashTier3: 0, cashFromBox: 16667, residual: 3333 },
       { playerId: 'B', cashTier1: 10000, cashTier2: 6667, cashTier3: 0, cashFromBox: 16667, residual: 3333 },
@@ -216,9 +225,30 @@ const vectors: Vector[] = [
     discrepancy: -1000,
     unallocatedCash: 1000,
     uncoveredClaims: 0,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 9000, cashTier2: 0, cashTier3: 0, cashFromBox: 9000, residual: 0 },
       { playerId: 'B', cashTier1: 10000, cashTier2: 0, cashTier3: 0, cashFromBox: 10000, residual: 0 },
+    ],
+    transfers: [],
+  },
+  {
+    // TV9b: both players are on the credit list, so the box is empty and stage
+    // 3 has nothing to hand out. A owes 100,00 EUR, but nobody has a claim -
+    // the chips are simply missing. unallocatedCash 0 + uncoveredDebts 10000
+    // == -discrepancy (docs/SETTLEMENT.md, step 5).
+    name: 'TV9b - chips missing, credit players only',
+    rows: [
+      { playerId: 'A', creditIn: 10000, stack: 0 },
+      { playerId: 'B', creditIn: 10000, stack: 10000 },
+    ],
+    discrepancy: -10000,
+    unallocatedCash: 0,
+    uncoveredClaims: 0,
+    uncoveredDebts: 10000,
+    lines: [
+      { playerId: 'A', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: -10000 },
+      { playerId: 'B', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: 0 },
     ],
     transfers: [],
   },
@@ -231,6 +261,7 @@ const vectors: Vector[] = [
     discrepancy: 1000,
     unallocatedCash: 0,
     uncoveredClaims: 1000,
+    uncoveredDebts: 0,
     lines: [
       { playerId: 'A', cashTier1: 10000, cashTier2: 0, cashTier3: 0, cashFromBox: 10000, residual: 2000 },
       { playerId: 'B', cashTier1: 0, cashTier2: 0, cashTier3: 0, cashFromBox: 0, residual: -1000 },
@@ -247,6 +278,7 @@ describe('computeSettlement - mandatory test vectors (docs/SETTLEMENT.md)', () =
     expect(result.discrepancy).toBe(vector.discrepancy);
     expect(result.unallocatedCash).toBe(vector.unallocatedCash);
     expect(result.uncoveredClaims).toBe(vector.uncoveredClaims);
+    expect(result.uncoveredDebts).toBe(vector.uncoveredDebts);
     expect(result.transfers).toEqual(vector.transfers);
 
     expect(
@@ -381,6 +413,33 @@ describe('TV12 - violated preconditions', () => {
     ).toThrowError(expect.objectContaining({ code: 'DUPLICATE_PLAYER', playerId: 'A' }));
   });
 
+  it('rejects a missing position with INVALID_POSITION', () => {
+    const withoutPosition = [
+      { playerId: 'A', cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
+    ] as unknown as SettlementParticipant[];
+
+    expect(() => computeSettlement(withoutPosition)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_POSITION', playerId: 'A' }),
+    );
+  });
+
+  it('rejects a non-integer position with INVALID_POSITION', () => {
+    expect(() =>
+      computeSettlement([
+        { playerId: 'A', position: 0.5, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
+      ]),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_POSITION', playerId: 'A' }));
+  });
+
+  it('rejects a duplicated position with INVALID_POSITION', () => {
+    expect(() =>
+      computeSettlement([
+        { playerId: 'A', position: 1, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
+        { playerId: 'B', position: 1, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
+      ]),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_POSITION', playerId: 'B' }));
+  });
+
   it('throws SettlementError instances that carry name and code', () => {
     let caught: unknown;
     try {
@@ -397,11 +456,12 @@ describe('TV12 - violated preconditions', () => {
 });
 
 describe('invariant 5 - stage 1 depends on who drained the box', () => {
-  // Counterexample to the literal wording of invariant 5 in docs/SETTLEMENT.md
-  // ("... as long as no credit player took a payout before"): here the box is
-  // drained by a *cash* player who took more cash than he paid in, so A gets
-  // nothing although stack >= cashIn, payout == 0 and no credit player took a
-  // payout. See qa/handoffs/WP3-siri.md, open questions.
+  // Invariant 5 of docs/SETTLEMENT.md holds exactly while `payout_j <= cashIn_j`
+  // for every j. Here C breaks that condition - a *cash* player who took more
+  // cash out of the box than he paid in - so stage 1 is rationed and A gets
+  // nothing although stack >= cashIn and payout == 0. The document covers this
+  // explicitly ("no matter whether cash or credit player"); the shortfall comes
+  // back as a debt from the credit debtor D.
   const rows: Row[] = [
     { playerId: 'A', cashIn: 10000, stack: 10000 },
     { playerId: 'C', cashIn: 5000, stack: 15000, payout: 15000 },
@@ -451,23 +511,22 @@ describe('sorting and determinism', () => {
     expect(withoutOrder(shuffled)).toEqual(withoutOrder(inOrder));
   });
 
-  it('keeps the given array order when no position is set', () => {
+  it('sorts by position, not by the array index', () => {
     const result = computeSettlement([
-      { playerId: 'z', cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
-      { playerId: 'a', cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
+      { playerId: 'z', name: 'Zoe', position: 7, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
+      { playerId: 'a', name: 'Ali', position: 3, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
     ]);
 
-    expect(result.lines.map((line) => line.playerId)).toEqual(['z', 'a']);
+    expect(result.lines.map((line) => line.playerId)).toEqual(['a', 'z']);
   });
 
-  it('breaks equal positions by name, then by playerId', () => {
-    const result = computeSettlement([
-      { playerId: 'p2', name: 'Bea', position: 0, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
-      { playerId: 'p1', name: 'Bea', position: 0, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
-      { playerId: 'p3', name: 'Ali', position: 0, cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 },
-    ]);
+  it('does not mutate the given input array', () => {
+    const input = participants(rows).reverse();
+    const before = [...input];
 
-    expect(result.lines.map((line) => line.playerId)).toEqual(['p3', 'p1', 'p2']);
+    computeSettlement(input);
+
+    expect(input).toEqual(before);
   });
 
   it('returns the identical result when run twice', () => {

@@ -83,7 +83,7 @@ export function computeSettlement(participants: SettlementInput): SettlementResu
     playerId: line.playerId,
     residual: line.residual,
   }));
-  const { transfers, uncoveredClaims } = computeTransfers(residuals);
+  const { transfers, uncoveredClaims, uncoveredDebts } = computeTransfers(residuals);
 
   return {
     algorithmVersion: ALGORITHM_VERSION,
@@ -96,14 +96,16 @@ export function computeSettlement(participants: SettlementInput): SettlementResu
     transfers,
     unallocatedCash: box,
     uncoveredClaims,
+    uncoveredDebts,
   };
 }
 
 /**
  * Checks the preconditions of `docs/SETTLEMENT.md` and returns the
- * participants sorted by join order, then name, then `playerId`, so that every
- * tie-break downstream is deterministic. A missing `position` falls back to the
- * index in the given array (the caller passes them in join order already).
+ * participants sorted by join order, so that every tie-break downstream is
+ * deterministic. `position` is mandatory and must be a unique integer: there is
+ * no fallback to the array index, because mixing real positions with array
+ * indices would sort silently wrong (TV12).
  */
 function validateAndSort(participants: SettlementInput): SettlementParticipant[] {
   if (participants.length === 0) {
@@ -111,6 +113,7 @@ function validateAndSort(participants: SettlementInput): SettlementParticipant[]
   }
 
   const seen = new Set<string>();
+  const seenPositions = new Set<number>();
   let totalPayout = 0;
   let totalCashIn = 0;
 
@@ -128,6 +131,8 @@ function validateAndSort(participants: SettlementInput): SettlementParticipant[]
       );
     }
     seen.add(p.playerId);
+
+    assertPosition(p, seenPositions);
 
     if (p.payout > p.stack) {
       throw new SettlementError(
@@ -148,21 +153,39 @@ function validateAndSort(participants: SettlementInput): SettlementParticipant[]
     );
   }
 
-  return participants
-    .map((participant, index) => ({ participant, index }))
-    .sort((a, b) => {
-      const positionA = a.participant.position ?? a.index;
-      const positionB = b.participant.position ?? b.index;
-      if (positionA !== positionB) return positionA - positionB;
+  // `position` is a unique integer after the check above, so the join order
+  // alone decides every comparison. The secondary and tertiary keys of
+  // `docs/SETTLEMENT.md` ("Eingabe") - name, then `playerId` - can therefore
+  // never apply: a duplicated position is rejected instead of being tie-broken
+  // silently. Sorting a copy keeps the caller's array untouched.
+  return [...participants].sort((a, b) => a.position - b.position);
+}
 
-      const nameA = a.participant.name ?? '';
-      const nameB = b.participant.name ?? '';
-      if (nameA !== nameB) return nameA < nameB ? -1 : 1;
+/**
+ * `position` is the join order from `session_players`. It is mandatory so that
+ * a partially filled preview array cannot mix real positions with array
+ * indices; duplicates would make the sort order depend on the input order.
+ */
+function assertPosition(participant: SettlementParticipant, seenPositions: Set<number>): void {
+  const { position, playerId } = participant;
 
-      // playerIds are unique (checked above), so this decides every remaining tie.
-      return a.participant.playerId < b.participant.playerId ? -1 : 1;
-    })
-    .map((entry) => entry.participant);
+  if (!Number.isInteger(position)) {
+    throw new SettlementError(
+      'INVALID_POSITION',
+      `position must be an integer join order, received: ${String(position)}`,
+      playerId,
+    );
+  }
+
+  if (seenPositions.has(position)) {
+    throw new SettlementError(
+      'INVALID_POSITION',
+      `position ${position} is used by more than one participant`,
+      playerId,
+    );
+  }
+
+  seenPositions.add(position);
 }
 
 function sum(

@@ -81,6 +81,18 @@ function buildUnbalanced(seed: Seed): SettlementParticipant[] {
   return assemble(seed, stacks);
 }
 
+/**
+ * Session with a deliberately chosen discrepancy: the stacks add up to the
+ * buy-ins plus `delta`, so both signs of `discrepancy` are hit on purpose
+ * instead of by chance. `delta` is clamped when it would drive the total below
+ * zero; the assertions read `result.discrepancy`, never `delta`.
+ */
+function buildWithDiscrepancy(seed: Seed, delta: number): SettlementParticipant[] {
+  const totalBuyIn = sum(seed.cash) + sum(seed.credit);
+  const stacks = splitExact(Math.max(0, totalBuyIn + delta), seed.stackSeeds);
+  return assemble(seed, stacks);
+}
+
 function assemble(seed: Seed, stacks: readonly number[]): SettlementParticipant[] {
   let boxLeft = sum(seed.cash);
   const payouts = stacks.map((stack, index) => {
@@ -118,6 +130,7 @@ function checkGeneralInvariants(
     result.cashBoxAfterPayouts,
     result.unallocatedCash,
     result.uncoveredClaims,
+    result.uncoveredDebts,
     ...result.lines.flatMap((line) => [
       line.cashTier1,
       line.cashTier2,
@@ -176,12 +189,27 @@ function checkGeneralInvariants(
     Math.min(positive, negative),
   );
 
+  // Step 5 – the discrepancy is explained completely and only by the two
+  // uncovered sums plus the cash left in the box. Nothing is silently dropped.
+  if (result.discrepancy < 0) {
+    expect(result.unallocatedCash + result.uncoveredDebts).toBe(-result.discrepancy);
+    expect(result.uncoveredClaims).toBe(0);
+  } else if (result.discrepancy > 0) {
+    expect(result.uncoveredClaims).toBe(result.discrepancy);
+    expect(result.unallocatedCash).toBe(0);
+    expect(result.uncoveredDebts).toBe(0);
+  } else {
+    expect(result.unallocatedCash).toBe(0);
+    expect(result.uncoveredClaims).toBe(0);
+    expect(result.uncoveredDebts).toBe(0);
+  }
+
   // 5 – a cash payer with stack >= cashIn and payout 0 gets his stake back, as
   // long as nobody has taken more cash out of the box than he put in himself.
-  // The document words this condition as "no credit player took a payout";
-  // that is one cent too weak, see the regression test
-  // "stage 1 can also run dry because of a cash player" in settlement.test.ts
-  // and the open question in qa/handoffs/WP3-siri.md.
+  // This is the condition of docs/SETTLEMENT.md verbatim (`payout_j <= cashIn_j`
+  // for all j); the counterexample of a cash player draining the box is kept as
+  // a regression test in settlement.test.ts ("invariant 5 - stage 1 depends on
+  // who drained the box").
   const overdrawn = participants.some((p) => p.payout > p.cashIn);
   if (!overdrawn) {
     for (const line of result.lines) {
@@ -228,6 +256,65 @@ describe('computeSettlement - properties (docs/SETTLEMENT.md, invariants 1-9)', 
           expect(result.uncoveredClaims).toBe(0);
         }
       }),
+      { numRuns: NUM_RUNS },
+    );
+  });
+
+  it('explains a deliberately produced discrepancy by the step 5 equations', () => {
+    const seenSigns = new Set<number>();
+    // Missing and surplus chips get their own branch instead of being left to
+    // chance; `discrepancy === 0` is already covered by the balanced property.
+    const deltaArbitrary = fc.oneof(
+      fc.integer({ min: -50_000, max: -1 }),
+      fc.integer({ min: 1, max: 50_000 }),
+    );
+
+    fc.assert(
+      fc.property(seedArbitrary, deltaArbitrary, (seed, delta) => {
+        const input = buildWithDiscrepancy(seed, delta);
+        const result = computeSettlement(input);
+
+        seenSigns.add(Math.sign(result.discrepancy));
+        checkGeneralInvariants(input, result);
+      }),
+      { numRuns: NUM_RUNS },
+    );
+
+    // The generator is only useful if it really produces both signs.
+    expect(seenSigns.has(-1)).toBe(true);
+    expect(seenSigns.has(1)).toBe(true);
+  });
+
+  it('reports an uncovered debt when no creditor is left (TV9b generalised)', () => {
+    fc.assert(
+      fc.property(
+        fc
+          .array(fc.integer({ min: 0, max: 2000 }).map((n) => n * 50), {
+            minLength: 2,
+            maxLength: 8,
+          })
+          .filter((credits) => sum(credits) > 0),
+        (credits) => {
+          // Everybody is on the credit list and every stack is zero: the box is
+          // empty, so nobody can be paid and every buy-in is a missing chip.
+          const input: SettlementParticipant[] = credits.map((creditIn, index) => ({
+            playerId: `p${index}`,
+            name: `Spieler ${index}`,
+            position: index,
+            cashIn: 0,
+            creditIn,
+            stack: 0,
+            payout: 0,
+          }));
+          const result = computeSettlement(input);
+
+          expect(result.discrepancy).toBe(-sum(credits));
+          expect(result.transfers).toEqual([]);
+          expect(result.unallocatedCash).toBe(0);
+          expect(result.uncoveredClaims).toBe(0);
+          expect(result.uncoveredDebts).toBe(sum(credits));
+        },
+      ),
       { numRuns: NUM_RUNS },
     );
   });

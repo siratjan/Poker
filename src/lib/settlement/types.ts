@@ -10,16 +10,19 @@ export type SettlementParticipant = {
   /** Player this row belongs to; must be unique within the input. */
   playerId: string;
   /**
-   * Display name, only used as a secondary sort key so that ties are
-   * deterministic. Missing names sort as the empty string.
+   * Display name, carried along for callers and logs. It is not used by the
+   * calculation: `position` is unique, so the secondary sort key of
+   * `docs/SETTLEMENT.md` never has to decide anything.
    */
   name?: string;
   /**
-   * Join order within the session. Missing positions fall back to the index in
-   * the given array, which is why callers should pass the participants already
-   * ordered by join order (see `docs/SETTLEMENT.md`, section "Eingabe").
+   * Join order within the session (`session_players.position`). Mandatory and
+   * unique within one input: a missing, non-integer or duplicated position is
+   * rejected with `INVALID_POSITION`. There is no fallback to the array index,
+   * so a hand-built preview array has to state the order explicitly
+   * (`docs/SETTLEMENT.md`, sections "Eingabe" and TV12).
    */
-  position?: number;
+  position: number;
   /** Sum of all `buy_in` rows paid with cash. */
   cashIn: number;
   /** Sum of all `buy_in` rows put on the credit list. */
@@ -84,4 +87,11 @@ export type SettlementResult = {
   unallocatedCash: number;
   /** Claims without cover, only possible for `discrepancy > 0`. */
   uncoveredClaims: number;
+  /**
+   * Debts without a creditor, only possible for `discrepancy < 0`. Together
+   * with `unallocatedCash` this explains a negative discrepancy completely:
+   * `unallocatedCash + uncoveredDebts === -discrepancy`
+   * (`docs/SETTLEMENT.md`, step 5).
+   */
+  uncoveredDebts: number;
 };
