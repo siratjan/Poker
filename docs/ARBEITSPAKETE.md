@@ -161,7 +161,8 @@ WP3 kann direkt nach WP0 parallel zu WP1/WP2 laufen.
 8. `src/components/auth/RoleGate.tsx`: rendert Kinder nur bei ausreichender Rolle (nur UI-Komfort).
 9. `src/app/(app)/page.tsx`: vorerst „Eingeloggt als … (Rolle)“ – wird in WP4 ersetzt.
 10. Abmelden: `src/actions/auth.ts` → `supabase.auth.signOut()`, Redirect `/login`.
-11. Commit `WP2: google auth, role plumbing, app shell`.
+11. Migration `supabase/migrations/0005_profile_sync.sql`: Trigger `after update of raw_user_meta_data on auth.users` → aktualisiert `app_users.display_name` und `avatar_url` (nie `role`). Der bestehende Spalten-Schutz-Trigger auf `app_users` muss diesen Pfad zulassen (z. B. über `set_config('app.profile_sync','on', true)` wie bei den Session-RPCs). `database.types.ts` bleibt unverändert.
+12. Commit `WP2: google auth, role plumbing, app shell`.
 
 **DoD**
 

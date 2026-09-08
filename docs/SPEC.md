@@ -46,6 +46,9 @@ Zugang:
 - Admin- und Editor-Adressen stehen vorab in der Tabelle `role_whitelist`. Beim ersten Login greift die dort hinterlegte Rolle.
 - Admins ändern Rollen in der App. Der letzte verbleibende Admin kann sich nicht selbst degradieren (DB-Trigger).
 - Ohne Login sieht man nichts außer der Login-Seite.
+- `role_whitelist` wirkt nur beim **ersten** Login eines Kontos. Für Konten, die schon einmal eingeloggt waren, gilt ausschließlich `app_users.role`, das Admins in der App ändern.
+- Anzeigename und Avatar werden bei jedem Login aus dem Google-Profil aktualisiert (Trigger auf `auth.users`-Update, WP2). Die Rolle bleibt davon unberührt.
+- Ein Google-Konto, das jemals etwas angelegt hat (`created_by`-Verweise), kann nicht aus `auth.users` gelöscht werden. Das ist gewollt: Das Audit-Log und die Erfasser-Angaben müssen lückenlos bleiben. Konten werden deaktiviert, indem man sie auf `viewer` setzt.
 
 ## 4. Datenmodell (fachlich)
 
@@ -55,7 +58,7 @@ Zugang:
   - `buy_in`: Betrag, Zahlungsart `cash` (bar) oder `credit` (auf Liste). Beträge sind variabel.
   - `cash_out`: End-Stack eines Spielers. Genau einer pro Spieler und Session. Nach dem Cash-out kein weiterer Buy-in für diesen Spieler, außer der Cash-out wird gelöscht.
   - `payout`: Bar-Auszahlung aus der Kasse an einen Frühgeher. Voraussetzung: Spieler hat bereits einen `cash_out`, Betrag ≤ Stack, Betrag ≤ aktueller Kassenstand. Ob der Frühgeher berechtigt ist, entscheidet die Gruppe; die App dokumentiert und zeigt zur Orientierung an, was er nach der Bar-zuerst-Regel bekäme.
-- **Abrechnung** (`settlements`): Wird beim Abschließen berechnet und eingefroren gespeichert (pro Spieler die Zeile, plus Überweisungsliste). Ändert sich nie nachträglich, auch nicht bei Algorithmus-Änderungen. Bei Wiederöffnen wird sie gelöscht und beim erneuten Abschließen neu berechnet.
+- **Abrechnung** (`settlements`): Wird beim Abschließen berechnet und eingefroren gespeichert (pro Spieler die Zeile, plus Überweisungsliste). Ändert sich nie nachträglich, auch nicht bei Algorithmus-Änderungen. Bei Wiederöffnen wird sie gelöscht und beim erneuten Abschließen neu berechnet. Der Grund fürs Wiederöffnen wird an `close_note` angehängt; die Historie mehrfacher Abschlüsse liegt vollständig im Audit-Log, eine eigene Ereignistabelle gibt es in v1 nicht.
 - **Einstellungen**: Schnellauswahl-Beträge für Buy-ins (Default 50 / 100 / 200 €), pflegbar durch Admin.
 - **Audit-Log**: Jede schreibende Aktion (Insert/Update/Delete auf Sessions, Teilnehmern, Einträgen, Spielern, Nutzerrollen, Einstellungen) mit Zeitpunkt, Nutzer (ID + E-Mail), Tabelle, Datensatz, Aktion, alten und neuen Werten. Wird per DB-Trigger geschrieben, ist für alle eingeloggten Nutzer lesbar und für niemanden änderbar oder löschbar.
 
