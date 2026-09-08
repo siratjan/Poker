@@ -71,6 +71,18 @@ describe('formatCents', () => {
     expect(formatCents(cents)).toBe(expected);
   });
 
+  it('throws on non-integer, NaN and Infinity instead of showing 0,00 €', () => {
+    expect(() => formatCents(NaN)).toThrow(/integer cents/);
+    expect(() => formatCents(Infinity)).toThrow(/integer cents/);
+    expect(() => formatCents(-Infinity)).toThrow(/integer cents/);
+    expect(() => formatCents(10.5)).toThrow(/integer cents/);
+    expect(() => formatCents(-0.01)).toThrow(/integer cents/);
+  });
+
+  it('accepts negative zero as zero', () => {
+    expect(formatCents(-0)).toBe('0,00 €');
+  });
+
   it('round-trips with parseEuroInput', () => {
     for (const cents of [0, 1, 99, 100, 250050, 123456789]) {
       expect(parseEuroInput(formatCents(cents).replace(' €', ''))).toBe(cents);

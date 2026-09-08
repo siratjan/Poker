@@ -6,11 +6,18 @@
 /**
  * Formats integer cents in German notation, e.g. `123450` -> `"1.234,50 €"`.
  * Negative amounts keep the sign: `-1234` -> `"-12,34 €"`.
+ *
+ * Throws on `NaN`, `Infinity` and non-integer input. Such a value is always a
+ * programming error, never a user error, and rendering it as `"0,00 €"` would
+ * hide broken money behind a plausible looking amount.
  */
 export function formatCents(cents: number): string {
-  const rounded = Number.isFinite(cents) ? Math.round(cents) : 0;
-  const sign = rounded < 0 ? '-' : '';
-  const abs = Math.abs(rounded);
+  if (!Number.isInteger(cents)) {
+    throw new Error(`formatCents expects integer cents, received: ${cents}`);
+  }
+
+  const sign = cents < 0 ? '-' : '';
+  const abs = Math.abs(cents);
   const euros = Math.floor(abs / 100);
   const fraction = abs % 100;
   const groupedEuros = String(euros).replace(/\B(?=(\d{3})+(?!\d))/g, '.');

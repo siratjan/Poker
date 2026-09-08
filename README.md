@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Poker-Kasse
 
-## Getting Started
+Web-App zur Dokumentation von Pokerabenden: Buy-ins (bar oder auf Liste), End-Stacks und die
+automatische Verteilung der Kasse samt Schuldenliste nach der Regel „Bargeld zuerst an Bar-Zahler“.
+Login über Google, Rollen admin / editor / viewer, lückenloses Audit-Log.
 
-First, run the development server:
+## Dokumentation
+
+- `CLAUDE.md` – Konventionen, eiserne Regeln, Befehlsübersicht
+- `docs/SPEC.md` – fachliche Wahrheit
+- `docs/SETTLEMENT.md` – Abrechnungs-Algorithmus mit Pflicht-Testfällen
+- `docs/ARBEITSPAKETE.md` – Arbeitspakete WP0–WP10
+- `docs/WORKFLOW.md` – Zusammenarbeit Planer / Developer / Tester
+- `docs/STATUS.md` – Fortschritt je Paket
+
+## Stack
+
+Next.js (App Router, `src/`), TypeScript strict, Tailwind, Supabase (`@supabase/ssr`),
+Vitest + fast-check, Deployment auf Vercel.
+
+## Einrichtung
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm ci
+cp .env.example .env.local   # NEXT_PUBLIC_SUPABASE_URL und NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY eintragen
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Befehle
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run dev            # Dev-Server auf http://localhost:3000
+npm run check          # typecheck + lint + test – Pflicht vor jeder Übergabe
+npm run build          # Produktions-Build
+npm run test:watch     # Tests im Watch-Modus
+npm run test:coverage  # Tests mit Coverage-Report
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Geldbeträge sind im gesamten Projekt Integer-Cent (`*_cents`); Anzeige über `formatCents`,
+Eingabe über `parseEuroInput` (`src/lib/money.ts`).

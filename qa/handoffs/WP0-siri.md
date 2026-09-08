@@ -94,3 +94,60 @@
   Non-Null-Assertions in den Supabase-Helfern entfallen.
 - `.editorconfig` bzw. `.gitattributes` (`* text=auto eol=lf`) gegen die CRLF-Warnungen unter
   Windows.
+
+## Runde 2 (Nacharbeit nach `qa/reports/WP0-gaby.md`)
+
+Planer-Entscheidung: F1, F3, F4, F5 beheben; F2 und F6 verschoben.
+
+| Finding | Was geändert | Datei |
+|---|---|---|
+| **F1** [Major] – Alias `@/*` in Vitest nicht auflösbar | `resolve.alias` ergänzt: `'@'` → `fileURLToPath(new URL('./src', import.meta.url))`, spiegelt das `paths`-Mapping aus `tsconfig.json`. Ohne neue Abhängigkeit, wie von Gaby vorgeschlagen (kein `vite-tsconfig-paths`). | `vitest.config.mts` |
+| **F1** – Regressionsschutz | Neue Testdatei, die `formatCents`/`parseEuroInput` **ausdrücklich** über `@/lib/money` importiert. Fällt der Alias künftig weg, bricht dieser Test beim Laden ab, statt dass es unbemerkt bleibt. | `src/lib/money.alias.test.ts` (neu) |
+| **F3** [Minor] – `formatCents` schluckt `NaN`/`Infinity`/Nicht-Ganzzahlen | `formatCents` wirft jetzt `Error("formatCents expects integer cents, received: …")`, wenn `Number.isInteger(cents)` falsch ist. Das stille `Math.round`/`Number.isFinite`-Fallback auf `0` ist entfernt. `-0` bleibt `"0,00 €"` (`Number.isInteger(-0)` ist `true`). Bewusst ein `throw`, kein Platzhalter: ein nicht-ganzzahliger Centbetrag ist ein Programmierfehler, kein Nutzerfehler, und soll laut Planer auffallen. | `src/lib/money.ts:6-24` |
+| **F3** – Tests | Zwei Fälle ergänzt: `NaN`, `±Infinity`, `10.5`, `-0.01` werfen; `-0` formatiert weiterhin als `"0,00 €"`. | `src/lib/money.test.ts` |
+| **F4** [Minor] – README ist create-next-app-Template | `README.md` vollständig ersetzt: Zweck in zwei Sätzen, Verweise auf `CLAUDE.md` und die fünf Dateien in `docs/`, Einrichtung (`npm ci`, `.env.example` → `.env.local`), Befehlsliste inkl. `test:coverage`, Hinweis Integer-Cent. Die falsche Geist-/`next/font`-Aussage ist damit weg. Die ungenutzten Generator-SVGs in `public/` und das Vercel-Favicon bleiben liegen – gehören laut Gaby in WP9. | `README.md` |
+| **F5** [Minor] – kein `test:coverage`-Script | `"test:coverage": "vitest run --coverage"` ergänzt. Ausgeführt: `src/lib/money.ts` 98,27 % Statements, 100 % Functions, 100 % Lines. | `package.json` |
+| **F5** – Folgefix | Das Script legt `coverage/` im Arbeitsbaum an. Der Ordner ist zwar über `.gitignore:14` (`/coverage`) ausgeschlossen, wurde von ESLint aber gelintet (`globalIgnores` überschreibt die Defaults von `eslint-config-next`) und erzeugte in `npm run check` eine Warnung aus `coverage/block-navigation.js`. `coverage/**` zu `globalIgnores` ergänzt; `npm run lint` ist wieder ohne jede Ausgabe. | `eslint.config.mjs` |
+
+### Verschoben laut Planer – in Runde 2 bewusst **nicht** angefasst
+
+- **F2** (Punkt-Ambiguität: `"100.555"` → `10055500`, stiller Faktor 1000) – verschoben nach **WP5**
+  (Rückspiegelung des geparsten Betrags über `formatCents` im Buy-in-Sheet). `src/lib/money.ts`
+  unverändert in diesem Punkt; Gabys Regressions-Pin in `tests/gaby/money.gaby.test.ts` hält die
+  aktuelle Regel fest.
+- **F6** (Non-Null-Assertions auf die Env-Variablen in den drei Supabase-Helfern) – verschoben nach
+  **WP2** (`src/lib/env.ts` mit zod-validiertem Zugriff). Gaby stuft das selbst als „kein
+  Nacharbeitsgrund für WP0" ein.
+
+### Gabys Testdatei
+
+`tests/gaby/money.gaby.test.ts` (38 Tests) ist unverändert in den Commit aufgenommen. Keine Zeile
+angefasst, alle 38 Tests grün. Ebenfalls mit committet: `qa/reports/WP0-gaby.md`, damit der
+Prüfbericht zum Paket im Repo liegt wie der Handoff.
+
+**Nicht committet**: `docs/ARBEITSPAKETE.md` ist im Arbeitsbaum geändert (WP2 Schritt 3,
+`middleware` → `proxy`) – das ist eine Änderung des Planers und bleibt ihm überlassen.
+
+### Neue Abhängigkeiten in Runde 2
+
+Keine. F1 ist ohne `vite-tsconfig-paths` gelöst.
+
+### Prüfung Runde 2
+
+- `npm run check`: **grün** (2026-09-08, 16:56) – typecheck ok, ESLint ohne jede Ausgabe,
+  **65 Tests in 3 Dateien** (27 `src/lib/money.test.ts`, 1 `src/lib/money.alias.test.ts`,
+  38 `tests/gaby/money.gaby.test.ts`).
+- `npm run build`: **grün** – `/` und `/_not-found` statisch, `Proxy (Middleware)` aktiv.
+  Einzige Ausgabe weiterhin die bekannte `middleware`-Deprecation-Warnung (Umstellung in WP2).
+- `npm run test:coverage`: läuft, `src/lib/money.ts` 100 % Lines / 100 % Functions.
+
+### So prüft man Runde 2
+
+1. `npm run check` → grün, 65 Tests in 3 Dateien, Lint ohne Warnung.
+2. `npm run build` → grün.
+3. `npm run test:coverage` → läuft durch, Tabelle für `src/lib/**`.
+4. F1 gegenprobe: in `vitest.config.mts` den `resolve`-Block auskommentieren, `npm test` →
+   `src/lib/money.alias.test.ts` bricht mit `Cannot find package '@/lib/money'` ab. Danach
+   zurücknehmen.
+5. F3: `formatCents(NaN)` wirft jetzt, statt `"0,00 €"` zu liefern.
+6. F4: `README.md` lesen – kein `create-next-app`-Text, keine Geist-Behauptung mehr.
