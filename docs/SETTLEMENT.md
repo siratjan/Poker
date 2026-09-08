@@ -22,8 +22,9 @@ Vorbedingungen (von der UI/DB erzwungen, der Algorithmus prüft sie trotzdem und
 - `payout ≤ stack` pro Spieler.
 - `Σ payout ≤ Σ cashIn` (man kann nicht mehr Bargeld auszahlen, als in der Kasse ist).
 
-Die Eingabe wird vor der Berechnung nach Beitrittsreihenfolge in der Session (sekundär Name,
-tertiär `playerId`) sortiert, damit alle Tie-Breaks deterministisch sind.
+Jeder Teilnehmer trägt eine `position` (Beitrittsreihenfolge aus `session_players`, ganzzahlig,
+eindeutig, Pflicht). Die Eingabe wird vor der Berechnung nach `position` sortiert, damit alle
+Tie-Breaks deterministisch sind. Weitere Sortierschlüssel gibt es nicht.
 
 ## Ausgabe
 
