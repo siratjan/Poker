@@ -39,6 +39,7 @@ type SettlementResult = {
   transfers: Transfer[];       // "from schuldet to amount"
   unallocatedCash: number;     // Bargeld, das nach Stufe 3 in der Kasse bleibt (nur bei discrepancy < 0 möglich)
   uncoveredClaims: number;     // Ansprüche ohne Deckung (nur bei discrepancy > 0 möglich)
+  uncoveredDebts: number;      // Schulden ohne Gläubiger (nur bei discrepancy < 0 möglich)
 };
 
 type SettlementLine = {
@@ -127,7 +128,11 @@ netResult_i   = stack_i − cashIn_i − creditIn_i
 
 Bei `discrepancy == 0` gilt `Σ residual == 0`.
 
-### Schritt 5 – Überweisungen (greedy, minimale Anzahl)
+### Schritt 5 – Überweisungen (greedy, wenige Überweisungen)
+
+Der Greedy erzeugt in der Praxis wenige Überweisungen, garantiert aber **nicht** das
+theoretische Minimum (das wäre NP-schwer). Verbindlich ist genau dieser Ablauf, damit das
+Ergebnis deterministisch und nachrechenbar bleibt.
 
 ```
 creditors = [(i, residual_i)  | residual_i > 0]  sortiert nach Betrag absteigend, dann Eingabereihenfolge
@@ -141,10 +146,13 @@ solange beide Listen nicht leer:
   entferne d bzw. c, wenn rest == 0 (bei Gleichstand beide)
 ```
 
-Nach der Schleife: `uncoveredClaims = Σ verbleibende creditor.rest` (nur > 0 bei `discrepancy > 0`).
-Verbleibende debtor.rest kann es nur bei `discrepancy < 0` geben; dieser Betrag wird **nicht**
-als Schuld ausgegeben, sondern ist bereits als `unallocatedCash` sichtbar (Chips fehlen →
-Kasse hat Überschuss). Der Admin muss beim Abschluss ohnehin kommentieren.
+Nach der Schleife: `uncoveredClaims = Σ verbleibende creditor.rest` (nur > 0 bei `discrepancy > 0`)
+und `uncoveredDebts = Σ verbleibende debtor.rest` (nur > 0 bei `discrepancy < 0`). Beide werden
+nicht als Überweisung ausgegeben, sondern separat gemeldet; die Anzeige (WP6) zeigt sie als
+„Differenz: n € Anspruch ohne Deckung“ bzw. „Differenz: n € Schuld ohne Gläubiger“. Bei
+`discrepancy < 0` gilt `unallocatedCash + uncoveredDebts == −discrepancy`; bei
+`discrepancy > 0` gilt `uncoveredClaims == discrepancy`. Der Admin muss beim Abschluss ohnehin
+kommentieren.
 
 ## Invarianten (Gaby prüft sie mit Property-Tests, z. B. fast-check)
 
@@ -273,7 +281,17 @@ Summe Transfers 100,00 exakt.
 | B | 100 | 0 | 100 | 0 |
 
 discrepancy = −10. Stufe 1: A 90, B 100 (box 10). Stufe 2: keine wants. unallocatedCash = 10.
-Residuen 0. Keine Transfers. (Abschluss nur durch Admin mit Kommentar.)
+Residuen 0. Keine Transfers. uncoveredDebts = 0. (Abschluss nur durch Admin mit Kommentar.)
+
+### TV9b – Differenz: Chips fehlen, nur Listen-Spieler
+
+| Spieler | cashIn | creditIn | stack | payout |
+|---|---|---|---|---|
+| A | 0 | 100 | 0 | 0 |
+| B | 0 | 100 | 100 | 0 |
+
+discrepancy = −100. box 0. Residuen: A −100, B 0. Keine Transfers. unallocatedCash = 0,
+uncoveredDebts = 100 (A schuldet 100, aber niemand hat Anspruch: die Chips fehlen).
 
 ### TV10 – Differenz: zu viel gezählt (Stacks > Buy-ins)
 
