@@ -1,0 +1,11 @@
+# Minimal Supabase CLI config.
+# Only needed so `npx supabase link --project-ref vcyqzqgybjggoreffwjc` and
+# `npx supabase db push` find the project. There is no local stack (no Docker),
+# development runs directly against the cloud project — see docs/SPEC.md.
+
+project_id = "vcyqzqgybjggoreffwjc"
+
+[db]
+# Supabase cloud currently runs Postgres 15+; the migrations use no version
+# specific syntax beyond `generated always as ... stored` (Postgres 12+).
+major_version = 17

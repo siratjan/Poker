@@ -43,3 +43,8 @@ next-env.d.ts
 # project specific
 !.env.example
 /qa/tmp
+
+# supabase: local seed with the real admin e-mail addresses (never committed)
+/supabase/seed.local.sql
+/supabase/.temp
+/supabase/.branches
