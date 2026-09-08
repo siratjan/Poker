@@ -1,11 +1,15 @@
 # WP0 – Prüfbericht Gaby
 
-**Urteil: NACHARBEIT**
+**Urteil: FREIGEGEBEN** (Runde 2, geprüfter Stand Commit `49bc81f`) – mit zwei Hinweisen, die keine Nacharbeit auslösen.
 
-Geprüfter Stand: Commit `9eb77db` („WP0: project setup"), 2026-09-08.
+Runde 1 (Commit `9eb77db`) endete mit **NACHARBEIT**: ein Major (F1), fünf Minor (F2–F6), kein
+Blocker, kein Fund mit falschem Geld. Siri hat F1, F3, F4 und F5 in Commit `49bc81f` behoben; F2
+und F6 hat der Planer bewusst nach WP5 bzw. WP2 verschoben und sie zählen hier nicht als offen.
+Alle vier bearbeiteten Findings sind nachgeprüft und geschlossen – Einzelheiten unten unter
+„Runde 2".
 Umgebung: Windows 11, Node v24.14.1, npm 11.11.0.
-Ein Major (F1), fünf Minor (F2–F6). Kein Blocker. Kein Fund, der falsches Geld erzeugt.
-F1 ist ein Vier-Zeilen-Fix in `vitest.config.mts`; danach ist das Paket aus meiner Sicht fertig.
+
+_Alles bis zum Abschnitt „Runde 2" ist der unveränderte Bericht aus Runde 1._
 
 ## Durchgeführt
 
@@ -211,6 +215,92 @@ Alle vier Abweichungen sind sachlich begründet und harmlos. Keine davon führt 
 3. **F2**, **F3**, **F6** brauchen eine Entscheidung des Planers – nicht ungefragt umsetzen.
 4. `tests/gaby/money.gaby.test.ts` mitcommitten (neu, bisher untracked).
 
-## Runde 2 (falls Nacharbeit)
+## Runde 2 – Nachprüfung
 
-- F1: offen
+Geprüfter Stand: Commit `49bc81f` („WP0: address review findings (round 2)"), 2026-09-08.
+Der Arbeitsbaum war vor meiner Prüfung sauber (`git status --short` ohne Ausgabe); die
+Planer-Änderung an `docs/ARBEITSPAKETE.md` liegt inzwischen als `43d51a9` im Repo.
+Auf Anweisung des Planers **kein** `npm ci` und kein Löschen von `node_modules`, weil parallel
+ein zweiter Agent im selben Ordner arbeitet.
+
+### Durchgeführt
+
+| Befehl | Ergebnis |
+|---|---|
+| `git show --stat 49bc81f` | 10 Dateien, +524/−29. Produktivcode nur in `vitest.config.mts`, `eslint.config.mjs`, `package.json`, `src/lib/money.ts` (dazu zwei Testdateien, README, qa-Dokumente). Kein Griff in fremde Bereiche. |
+| `git show 49bc81f -- vitest.config.mts eslint.config.mjs package.json src/lib/money*.ts` | vollständig gelesen, Bewertung je Finding unten |
+| `npm run check` | **grün** – typegen ok, ESLint **ohne jede Ausgabe**, 65 Tests in 3 Dateien. Deckt sich exakt mit Siris Angabe im Handoff. |
+| `npx vitest run tests/gaby/alias.gaby.test.ts` (meine neue Datei) | **grün** – 2 Tests |
+| `npm run test:coverage` | **grün** – 67 Tests in 4 Dateien; `src/lib/money.ts` 98,27 % Stmts, 95,83 % Branch, 100 % Funcs, **100 % Lines**. Die drei Supabase-Helfer stehen erwartungsgemäß bei 0 % (kein Test, kein Login – WP1/WP2). |
+| `npx eslint coverage/block-navigation.js` | „File ignored because of a matching ignore pattern" – die neue Ignore-Regel greift |
+| `npx eslint qa/tmp/coverage/probe.js` (Wegwerf-Datei, danach gelöscht) | **wird gelintet** – die Regel ist also am Projektstamm verankert und schluckt keinen gleichnamigen Unterordner |
+| `git status --short` | nur `?? tests/gaby/alias.gaby.test.ts` (meine neue Datei). Kein `coverage/`, kein `node_modules`, kein `.next` im Status. |
+| `npm run check` (erneut, mit meiner neuen Testdatei) | **grün** – 67 Tests in 4 Dateien, Lint weiterhin ohne Ausgabe |
+| `npm run build` | **nicht ausgeführt** (Vorgabe des Planers, paralleler Agent im Ordner). Siri meldet grün; keine der vier Änderungen berührt den Build-Pfad – `formatCents` wird außerhalb von `src/lib/money.ts` und den Testdateien repo-weit noch nirgends aufgerufen. |
+
+### Findings aus Runde 1
+
+| # | Grad | Status | Begründung |
+|---|---|---|---|
+| **F1** | Major | **✔ behoben** | `vitest.config.mts:4-10` mappt `'@'` per `fileURLToPath(new URL('./src', import.meta.url))` – ohne neue Abhängigkeit, exakt wie vorgeschlagen. Von beiden Seiten nachgeprüft: Siris Wächter `src/lib/money.alias.test.ts` und meine neue `tests/gaby/alias.gaby.test.ts` importieren über `@/lib/money` und laufen grün. Meine Datei prüft zusätzlich `formatCents === relative.formatCents`, d. h. Alias- und Relativ-Import liefern **dieselbe Modulinstanz**; es entsteht kein zweiter Modulgraph. Der Alias greift präfixgenau, `@supabase/...` bleibt unberührt (Testlauf grün). |
+| **F2** | Minor | **— verschoben** | Punkt-Ambiguität, laut Planer nach **WP5** (Rückspiegelung des geparsten Betrags über `formatCents` im Buy-in-Sheet). `src/lib/money.ts` ist in diesem Punkt unverändert; mein Regressions-Pin in `tests/gaby/money.gaby.test.ts` hält die aktuelle Regel fest. Nicht als offen gewertet. |
+| **F3** | Minor | **✔ behoben** | `src/lib/money.ts:14-17` wirft jetzt `Error("formatCents expects integer cents, received: …")`; das stille `Math.round`/`Number.isFinite`-Fallback auf `0` ist entfernt. Von Hand nachgerechnet: `Number.isInteger(-0)` ist `true` und `-0 < 0` ist `false` → `formatCents(-0)` bleibt `"0,00 €"`, kein `"-0,00 €"`. `NaN`, `±Infinity`, `10.5`, `-0.01` werfen. `src/lib/money.test.ts:74-84` deckt genau diese fünf Fälle plus `-0` ab. Kein Aufrufer bricht dadurch: `formatCents` wird außerhalb der Tests noch nirgends benutzt. |
+| **F4** | Minor | **✔ behoben** | `README.md` vollständig ersetzt: Zweck, Verweise auf `CLAUDE.md` und die fünf `docs/`-Dateien, Stack, Einrichtung (`npm ci`, `.env.example` → `.env.local`), Befehlsliste inkl. `test:coverage`, Integer-Cent-Hinweis. Suche nach `geist`/`next/font` in `README.md` und `src/`: **keine Treffer**, die falsche Schrift-Aussage ist weg. Die Generator-SVGs in `public/` und das Vercel-Favicon bleiben wie vorgesehen liegen – WP9, hier kein Mangel. |
+| **F5** | Minor | **✔ behoben** | `package.json:13` enthält `"test:coverage": "vitest run --coverage"`. Selbst ausgeführt, läuft durch, Tabelle für `src/lib/**` wie oben. Damit ist die WP3-Forderung („Coverage für `src/lib/settlement/**` ≥ 95 % Zeilen") reproduzierbar prüfbar. |
+| **F6** | Minor | **— verschoben** | Non-Null-Assertions auf die Env-Variablen, laut Planer nach **WP2** (`src/lib/env.ts`, zod-validiert). Die drei Supabase-Helfer sind unverändert. Nicht als offen gewertet. |
+
+### Bewertung: `coverage/**` in `eslint.config.mjs`
+
+**Korrekt und minimal.** Die Ergänzung steht in `eslint.config.mjs:15-16` innerhalb desselben
+`globalIgnores`-Aufrufs, der die Defaults von `eslint-config-next` nachbildet – der einzige
+richtige Ort, denn ein `globalIgnores` **ersetzt** diese Defaults, statt sie zu erweitern.
+Drei Punkte nachgeprüft:
+
+1. **Nötig?** Ja. ESLint ignoriert per Default nur `node_modules/` und `.git/`; die Flat Config
+   liest `.gitignore` nicht. Ohne die Regel lintet `npm run lint` den v8-Report und meldet – wie
+   von Siri beschrieben – eine Warnung aus `coverage/block-navigation.js`. Ausgelöst hat das erst
+   F5: ohne die Ergänzung macht der neue Befehl `npm run test:coverage` den nächsten
+   `npm run check` warnend. Der Folgefix gehört sachlich zu F5, ist also kein Scope-Creep.
+2. **Wirksam?** Ja – `npx eslint coverage/block-navigation.js` meldet „File ignored because of a
+   matching ignore pattern"; nach einem Coverage-Lauf ist `npm run lint` ohne jede Ausgabe.
+3. **Zu breit?** Nein. Ein Muster mit `/` in der Mitte ist in der Flat Config am Projektstamm
+   verankert. Gegenprobe mit einer Wegwerf-Datei `qa/tmp/coverage/probe.js`: die wird **gelintet**
+   (Warnung `no-unused-vars`), die Regel verschluckt also keinen gleichnamigen Unterordner in
+   `src/`. Datei danach gelöscht. Deckungsgleich mit `.gitignore:14` (`/coverage`, ebenfalls nur
+   Stamm) und mit dem Standard-Ausgabeordner von `@vitest/coverage-v8`.
+
+Alternative wäre `coverage/` statt `coverage/**` gewesen (spart ESLint das Betreten des Ordners);
+der Unterschied ist Laufzeit, nicht Verhalten. Kein Einwand.
+
+### Meine neue Testdatei
+
+`tests/gaby/alias.gaby.test.ts` (2 Tests, grün) – Alias-Wächter **aus `tests/gaby/` heraus**, also
+von genau dem Ort, der in Runde 1 gebrochen war (Siris Wächter liegt in `src/`). Prüft zusätzlich,
+dass Alias- und Relativ-Import dieselbe Modulinstanz liefern. Die Datei ist neu und **noch nicht
+committet** – bitte beim nächsten Commit mitnehmen. `tests/gaby/money.gaby.test.ts` hat Siri
+unverändert übernommen: 38 Tests, kein `skip`, kein `only`, keine abgeschwächte Erwartung.
+
+### Hinweise (kein Nacharbeitsgrund)
+
+- **`Number.isInteger` statt `Number.isSafeInteger` in `formatCents`** (`src/lib/money.ts:15`):
+  Die neue Schranke lässt unsichere Ganzzahlen durch. `formatCents(1e23)` liefert
+  `"999.999.999.999.999.900.000,92 €"`, `formatCents(Number.MAX_VALUE)` sogar
+  `"1.7.976.931.348.623.156e+306,68 €"` – die Gruppierungs-Regex zerlegt die
+  Exponentialschreibweise. Erreichbar ist das weder über `parseEuroInput` (kappt bei
+  `Number.isSafeInteger`) noch aus einer Integer-Spalte, und es ist keine Regression – der alte
+  Code tat via `Math.round` dasselbe. Ein Wort Änderung schließt die Lücke; Vorschlag für WP3,
+  sobald `src/lib/settlement/**` Summen bildet.
+- **ESLint lintet `qa/tmp/`**: Der Ordner ist in `.gitignore` als Ablage vorgesehen, für ESLint
+  aber gewöhnlicher Quellcode – meine Wegwerf-Datei tauchte prompt in `npm run lint` auf. Solange
+  dort nur Markdown liegt, passiert nichts; sobald ein Agent eine `.js`/`.ts`-Notiz ablegt, wird
+  `npm run check` grundlos rot. `"qa/tmp/**"` in derselben `globalIgnores`-Liste wäre konsequent.
+  Kosmetik, gehört nicht in WP0.
+
+### Weiterhin nicht verifiziert
+
+Unverändert gegenüber Runde 1: die Sichtprüfung im Browser (DoD-Punkt 1, macht der Planer über
+`.claude/launch.json`, Konfiguration `dev`), die Supabase-Verbindung, der Middleware-Matcher gegen
+`/manifest.webmanifest` und `/icons/*` (WP2/WP9) sowie das Verhalten ohne `.env.local` (F6, WP2).
+Neu in Runde 2: `npm run build` habe ich diesmal **nicht** selbst laufen lassen (Vorgabe des
+Planers wegen des parallel arbeitenden Agenten). In Runde 1 war er grün, und keine der vier
+Änderungen berührt den Build-Pfad.

@@ -2,7 +2,7 @@
 
 | WP | Titel | Siri-Commit | Gaby-Urteil | Planer-Abnahme | Datum |
 |---|---|---|---|---|---|
-| WP0 | Projekt-Setup | – | – | – | – |
+| WP0 | Projekt-Setup | 49bc81f | FREIGEGEBEN (Runde 2) | abgenommen, Browser geprüft | 2026-09-08 |
 | WP1 | Datenbank | – | – | – | – |
 | WP2 | Auth + Rollen | – | – | – | – |
 | WP3 | Abrechnungs-Algorithmus | – | – | – | – |
