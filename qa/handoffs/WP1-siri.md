@@ -41,9 +41,13 @@ damit **nicht verifiziert** (Details unter „Prüfung“).
   `supabase gen types typescript` (`Database → public → Tables/Views/Functions/Enums`, je Tabelle
   `Row`/`Insert`/`Update`/`Relationships`), dazu die üblichen Helfer `Tables<>`, `TablesInsert<>`,
   `TablesUpdate<>`, `Enums<>` sowie die Konstante `TABLE_NAMES` (die das Smoke-Script nutzt).
-- **`scripts/rls-smoke.ts`** – prüft ohne Login jede Tabelle (select + insert) und die fünf
-  aufrufbaren Funktionen. „Geblockt“ ist sowohl ein Fehler (permission denied / RLS) als auch ein
-  leeres Ergebnis; „Leck“ ist jede zurückgelieferte Zeile und jeder erfolgreiche Schreibzugriff.
+- **`scripts/rls-smoke.ts`** – prüft ohne Login jede Tabelle (select + insert) und alle sieben
+  aufrufbaren Funktionen (Runde 2, F7). „Geblockt“ ist ein Fehler (permission denied / RLS);
+  „Leck“ ist jede zurückgelieferte Zeile und jeder erfolgreiche Schreibzugriff. Ein leeres
+  Ergebnis **ohne** Fehler ist seit Runde 2 ein eigenes Urteil `UNKLAR` (vermutlich geblockt,
+  aber nicht beweiskräftig – eine ungeschützte Tabelle in einer leeren Datenbank antwortet
+  genauso). Ausnahme `settings`: dort legt `0001` `quick_amounts_cents` an, die Tabelle ist also
+  nie leer, und 0 Zeilen sind dort ein echter Beweis.
 - **`package.json`** – neue Scripts `rls:smoke` (`tsx scripts/rls-smoke.ts`) und `types:gen`.
 - **`.gitignore`** – `/supabase/seed.local.sql` (Datei selbst bewusst **nicht** angelegt),
   dazu `/supabase/.temp` und `/supabase/.branches` (CLI-Arbeitsdateien).
@@ -75,7 +79,7 @@ damit **nicht verifiziert** (Details unter „Prüfung“).
 | 21 | Name/Datum nur änderbar, solange `open` (SPEC 5.6) | derselbe Trigger | `SESSION_CLOSED` |
 | 22 | Abschluss erst, wenn alle Teilnehmer einen Stack haben (SPEC 5.4) | `close_session`, Zählung über `session_players` × `entries` | `MISSING_CASH_OUT` |
 | 23 | Differenz ≠ 0 → nur Admin, Kommentar Pflicht (SPEC 5.5) | `close_session`, `is_admin()` **und** `length(trim(note)) >= 3` | `DISCREPANCY_REQUIRES_ADMIN_NOTE` |
-| 24 | Differenz wird serverseitig nachgerechnet, nicht geglaubt (WP1) | `close_session` aggregiert `entries` neu und vergleicht Summen **und jede einzelne Zeile** | `SETTLEMENT_MISMATCH` |
+| 24 | Differenz wird serverseitig nachgerechnet, nicht geglaubt (WP1) | `close_session` aggregiert `entries` neu und vergleicht die fünf Kopfzahlen sowie je Zeile alle **aus der Aggregation ableitbaren** Werte (`cashIn`, `creditIn`, `stack`, `payout`, `isCashPlayer`, `claim`, `netResult`, `residual`, `cashFromBox = t1+t2+t3`, `cashFromBox ≤ claim`). Die Aufteilung auf die Stufen 1/2/3 wird **nicht** in SQL nachgerechnet; sie ist über die Invarianten in Zeile 25–26 und 41–43 abgesichert | `SETTLEMENT_MISMATCH` |
 | 25 | Kasseninvariante `Σ cashFromBox + unallocated = Σ cash − Σ payout` (SETTLEMENT Inv. 2) | `close_session` | `SETTLEMENT_INVARIANT` |
 | 26 | `Σ transfers + uncoveredClaims = Σ positive residual` (SETTLEMENT Schritt 5) | `close_session` | `SETTLEMENT_INVARIANT` |
 | 27 | Abrechnung wird eingefroren, nie neu berechnet (SPEC 4) | `settlements` PK auf `session_id`, keine Insert/Update/Delete-Policy – nur die RPCs schreiben | RLS |
@@ -89,6 +93,15 @@ damit **nicht verifiziert** (Details unter „Prüfung“).
 | 35 | Whitelist pflegt nur der Admin | vier Policies auf `role_whitelist`, alle `is_admin()` | RLS |
 | 36 | Geld ist Integer-Cent (CLAUDE.md) | alle Beträge `integer` (`*_cents`), kein `numeric`, kein `float` | – |
 | 37 | Live-Update im Session-Detail (SPEC 7) | `0004_realtime.sql`: Publication + `replica identity full` auf `entries` | – |
+| 38 | Teilnehmer **hinzufügen** nur in offener Session (SPEC 5.6) | Policy `session_players_insert` mit `public.session_is_open(session_id)` (`0003`) | RLS (42501) |
+| 39 | Ein Konto, das etwas angelegt hat, ist nicht löschbar (SPEC 3) | die `created_by`/`added_by`/`computed_by`/`updated_by`-FKs auf `app_users` haben **bewusst keine** `on delete`-Regel und blocken damit die Kaskade aus `auth.users` | 23503 |
+| 40 | „Bar-Zahler“ = mindestens ein `cash`-Buy-in (SPEC 6, SETTLEMENT „Ausgabe“) | `close_session`: `l."isCashPlayer" is distinct from (agg.cash_in > 0)` | `SETTLEMENT_MISMATCH` |
+| 41 | „Bargeld zuerst an Bar-Zahler“ (SETTLEMENT Inv. 6) | `close_session`: sobald `Σ cashTier3 > 0` ist, muss jeder Bar-Zahler `cashFromBox = claim` haben (Runde 2, F2) | `SETTLEMENT_INVARIANT` |
+| 42 | Überweisungen laufen vom Schuldner (`residual < 0`) zum Gläubiger (`residual > 0`), Summe = `min(Σ pos. Residual, Σ neg. Residual)` (SETTLEMENT Schritt 5, Inv. 9) | `close_session` (Runde 2, F2) | `SETTLEMENT_INVARIANT` |
+| 43 | Die Differenz zeigt sich in `unallocatedCash`/`uncoveredClaims`/`uncoveredDebts` (SETTLEMENT Schritt 5) | `close_session` prüft die drei Gleichungen je nach Vorzeichen der Differenz (Runde 2, F1) | `SETTLEMENT_INVARIANT` |
+| 44 | Erfassender Nutzer kommt aus dem Token, nicht vom Client (SPEC 4) | `default auth.uid()` (`0001`) + Trigger `stamp_actor` bei `insert` (Runde 2, F4) | – |
+| 45 | Ein Eintrag wechselt nie Session, Spieler oder Typ (WP1 Runde 2) | `validate_entry` Regel (f) | `ENTRY_IMMUTABLE_KEYS` |
+| 46 | Eine neue Session trägt keine Abschlussdaten (SPEC 5) | Policy `sessions_insert` verlangt zusätzlich `closed_at/closed_by/discrepancy_cents/close_note/reopened_at/reopened_by is null` (Runde 2, F6) | RLS (42501) |
 
 ## So spielt der Planer die Migrationen per SQL-Editor ein
 
@@ -241,8 +254,10 @@ bleibt also nötig, oder `npx supabase db push --include-seed`.
    - `0002` → `validate_entry` (c2): der Kassen-Check läuft bei Insert, Update **und** Delete.
    - `0003` → `sessions_delete`: `is_admin() and status = 'open' and not exists(settlements)`.
    - `0003` → `audit_log`: nur `select`, kein Grant für irgendetwas anderes.
-5. Seed prüfen: `grep -i "@" supabase/seed.sql` darf keine echte Adresse zeigen; enthalten sind
-   nur `ADMIN_EMAIL_*`, `EDITOR_EMAIL_1` und `example.invalid` im Kommentar.
+5. Seed prüfen: `grep -i "@" supabase/seed.sql` **liefert keine Treffer** – die Datei enthält
+   überhaupt kein `@`; die Platzhalter heißen `ADMIN_EMAIL_1/2/3` und `EDITOR_EMAIL_1`, ganz ohne
+   Klammeraffe. Eine leere Ausgabe ist hier also das erwartete Ergebnis und kein Fehler.
+   (`example.invalid` steht in `scripts/rls-smoke.ts`, nicht im Seed.)
 6. `git check-ignore -v supabase/seed.local.sql` → Treffer in `.gitignore`.
 7. Nach dem Einspielen (Planer): Schritt 8 und 10 der Anleitung oben, dann `npm run rls:smoke`
    erneut – dann darf keine Zeile `LECK` sagen.
@@ -257,9 +272,10 @@ bleibt also nötig, oder `npx supabase db push --include-seed`.
   was bei zwei gleichzeitigen „Spieler hinzufügen“ in einen Unique-Konflikt laufen kann.
 - **View `session_overview`** (WP4 Schritt 3 nennt sie schon) und `player_stats` (WP7) als
   `security_invoker = true`-Views – dann bleibt `listSessions` eine einzige Query.
-- **Fehlercode-Katalog**: Die 21 Codes dieses Pakets gehören in WP5 vollständig nach
+- **Fehlercode-Katalog**: Die 22 Codes dieses Pakets gehören in WP5 vollständig nach
   `src/lib/errors/de.ts`. Liste: `SESSION_CLOSED`, `SESSION_NOT_FOUND`, `SESSION_NOT_CLOSED`,
-  `PLAYER_ALREADY_CASHED_OUT`, `PAYOUT_REQUIRES_CASH_OUT`, `PAYOUT_EXCEEDS_STACK`,
+  `ENTRY_IMMUTABLE_KEYS`, `PLAYER_ALREADY_CASHED_OUT`, `PAYOUT_REQUIRES_CASH_OUT`,
+  `PAYOUT_EXCEEDS_STACK`,
   `PAYOUT_EXCEEDS_CASHBOX`, `STACK_BELOW_PAYOUT`, `CASH_OUT_HAS_PAYOUT`, `PLAYER_HAS_ENTRIES`,
   `USE_RPC`, `IMMUTABLE_FIELD`, `LAST_ADMIN`, `ONLY_ROLE_EDITABLE`, `FORBIDDEN`,
   `NO_PARTICIPANTS`, `MISSING_CASH_OUT`, `DISCREPANCY_REQUIRES_ADMIN_NOTE`,
@@ -270,3 +286,85 @@ bleibt also nötig, oder `npx supabase db push --include-seed`.
   `src/lib/database.types.ts` vergleichen. Abweichungen sind entweder Tippfehler von mir oder
   echte Schema-Überraschungen – beides will man wissen. Achtung: `types:gen` überschreibt die
   Datei inklusive `TABLE_NAMES`; die Konstante müsste dann in eine eigene Datei wandern.
+
+## Runde 2 – Nacharbeit zu `qa/reports/WP1-gaby.md`
+
+Alle zehn Findings umgesetzt, nach den Planer-Entscheidungen vom 2026-09-08. Die Datenbank ist
+weiterhin **nicht eingespielt**, deshalb wurde – wie vom Planer entschieden – direkt in `0001` und
+`0002` geändert statt eine Migration `0005` nachzuschieben. Wer die Migrationen schon einmal
+eingespielt hätte, müsste die Datenbank einmal neu aufsetzen.
+
+| Finding | Was geändert |
+|---|---|
+| **F1** (Major) | `0001`: Spalte `uncovered_debts_cents integer not null` in `settlements`. `0002` → `close_session`: `uncoveredDebts` wird aus `p_settlement` gelesen, muss vorhanden und `>= 0` sein (sonst `SETTLEMENT_MISMATCH`), wird gegen die Gleichungen aus `docs/SETTLEMENT.md` Schritt 5 geprüft und gespeichert. `src/lib/database.types.ts`: Spalte in `Row`/`Insert`/`Update` nachgezogen. Der Round-Trip `SettlementResult → RPC-JSON → DB` ist damit verlustfrei. |
+| **F2** | `close_session` prüft zusätzlich: (a) jede Transfer-Zeile geht von `residual < 0` an `residual > 0` und beide sind Zeilen dieser Abrechnung; (b) `Σ transfers = min(Σ positives Residual, Σ negatives Residual)` sowie `Σ transfers + uncoveredDebts = Σ negatives Residual`; (c) „Bar zuerst“ – sobald irgendein `cashTier3 > 0` ist, muss für jeden `isCashPlayer` gelten `cashFromBox = claim`. (d) `cashFromBox ≤ claim` und die `residual`-Formel waren bereits vorhanden (gegen die **serverseitige** Aggregation, also strenger als gegen die Client-Zeile) und blieben unverändert. Alle neuen Verstöße werfen `SETTLEMENT_INVARIANT` mit sprechendem `detail`; die schon vorhandenen Invarianten haben jetzt ebenfalls ein `detail`. |
+| **F3** | `validate_entry`, neue Regel (f): bei `UPDATE` dürfen `session_id`, `player_id` und `type` nicht wechseln → **neuer Fehlercode `ENTRY_IMMUTABLE_KEYS`**. Die Prüfung steht hinter der Session-Prüfung, damit `SESSION_CLOSED` Vorrang behält. Damit ist der Weg zu, einen Bar-Buy-in in eine andere Session umzuhängen (die Kassenprüfung sah nur die Zielseite) oder einen `cash_out` auf einen anderen Spieler zu schieben. |
+| **F4** | `0001`: `default auth.uid()` auf `players.created_by`, `sessions.created_by`, `session_players.added_by`, `entries.created_by`, `settlements.computed_by`, `settings.updated_by`. `0002`: neue Trigger-Funktion `stamp_actor()` (kein `security definer`, sie braucht keine erhöhten Rechte) plus fünf `before insert`-Trigger `stamp_players`, `stamp_sessions`, `stamp_session_players`, `stamp_entries` und `stamp_settings` (dieser auch `before update`, weil `updated_by` „wer zuletzt geändert hat“ bedeutet). Ein vom Client mitgeschickter Wert wird überschrieben; bei `UPDATE` bleibt `created_by` unangetastet. Wie bei `protect_app_user_columns` steigt die Funktion aus, wenn `auth.uid()` null ist – das ist ausschließlich der SQL-Editor-/Seed-Pfad, den der Planer zum Bootstrappen braucht. |
+| **F5** | `reopen_session` setzt zusätzlich `closed_at = null`, `closed_by = null`, `discrepancy_cents = null`. `close_note` bleibt erhalten und bekommt den Grund angehängt; die alten Werte stehen vollständig in `audit_log.old_data` (SPEC 4). Damit kann WP6/WP7 `sessions.discrepancy_cents` lesen, ohne vorher auf den Status zu schauen. |
+| **F6** | Policy `sessions_insert` verlangt jetzt zusätzlich `closed_at`, `closed_by`, `discrepancy_cents`, `close_note`, `reopened_at`, `reopened_by` = `null`. Eine „geborene“ Session mit erfundener Differenz ist damit nicht mehr anlegbar. |
+| **F7** | `scripts/rls-smoke.ts`: neues Urteil `UNKLAR` für „0 Zeilen ohne Fehler“ – das wird nicht mehr als `OK` verbucht, sondern am Ende ausdrücklich als „vermutlich geblockt, nicht beweiskräftig (die Datenbank kann leer sein)“ benannt. `settings` ist als beweiskräftiger Fall markiert (`0001` legt dort `quick_amounts_cents` an, die Tabelle ist also nie leer – 0 Zeilen bedeuten dort wirklich „weggefiltert“). Die zwei fehlenden Funktionen `current_app_role` und `session_is_open` sind ergänzt (jetzt 29 statt 27 Prüfungen). Die Schlusszeile unterscheidet „OK“ von „OK mit Einschränkung“. Der Exit-Code bleibt 0, solange es kein Leck und nichts Fehlendes gibt. |
+| **F8** | Die Mapping-Tabelle oben hat die drei fehlenden Regeln bekommen (Zeilen 38 Teilnehmer-Hinzufügen, 39 Konto nicht löschbar, 40 Definition „Bar-Zahler“) plus die in Runde 2 dazugekommenen Regeln 41–46. Zeile 24 ist umformuliert: nachgerechnet werden die *aus der Aggregation ableitbaren* Werte, nicht die Stufenverteilung. |
+| **F9** | `revoke all on function … from public, anon, authenticated` für alle neun reinen Trigger-Funktionen am Dateiende von `0002`. Die Trigger selbst laufen weiter: das Ausführungsrecht wird bei `create trigger` geprüft, nicht beim Feuern. |
+| **F10** | „So prüft man es“, Punkt 5 korrigiert: `grep -i "@" supabase/seed.sql` liefert **keine** Treffer, weil die Datei gar kein `@` enthält. Die leere Ausgabe ist das erwartete Ergebnis. |
+
+### Abweichung: Gabys Test musste an drei Stellen nachgezogen werden
+
+`tests/gaby/wp1-schema.gaby.test.ts` friert unter anderem drei Zahlen ein, die durch F3 und F4
+zwangsläufig stale werden. Ich habe **nur diese drei Literale** geändert, keine einzige Zusicherung
+abgeschwächt oder entfernt:
+
+| Stelle | vorher | nachher | Grund |
+|---|---|---|---|
+| `expect(created).toBe(…)` (Trigger) | 15 | 20 | F4 bringt fünf `stamp_*`-Trigger mit |
+| `expect(functionHeaders.length).toBe(…)` | 15 | 16 | F4 bringt `stamp_actor()` mit |
+| `KNOWN_ERROR_CODES` | 21 Codes | 22 Codes (`ENTRY_IMMUTABLE_KEYS` ergänzt) | F3, Fehlercode vom Planer so vorgegeben |
+
+Der Test ist genau dafür gebaut – sein eigener Kopfkommentar sagt, ein neuer Fehlercode solle
+fehlschlagen „und daran erinnern, dass WP5 eine deutsche Meldung braucht“. Diese Erinnerung ist
+oben unter „Vorschläge“ eingelöst: die Liste für `src/lib/errors/de.ts` hat jetzt 22 Einträge.
+Zwei weitere Fehlschläge (die beiden Invarianten-Regexe in `close_session`) habe ich **nicht** im
+Test, sondern in meinem SQL geheilt: die zwei bestehenden Vergleiche stehen weiter wortgleich in
+der von Gaby eingefrorenen Form da, die neuen Prüfungen kommen daneben. **Bitte Gaby diese drei
+Zeilen gegenlesen lassen.**
+
+### Prüfung Runde 2
+
+- `npm run check`: **grün** – typecheck ok, ESLint ohne Ausgabe, 217 Tests in 9 Dateien
+  (darunter Gabys 56 WP1-Tests, alle grün; die übrigen kommen aus WP0 und der parallel laufenden
+  WP3-Runde-2).
+- `npm run build`: **grün** – `/` und `/_not-found` statisch, `Proxy (Middleware)` aktiv;
+  weiterhin nur die bekannte `middleware`-Deprecation aus WP0.
+- `npm run rls:smoke`: unverändertes Verhalten gegen die **nicht** eingespielte Datenbank –
+  jetzt 29 statt 27 Prüfungen, alle `FEHLT`, dieselbe Klartextmeldung, Exit-Code 1, kein
+  Stacktrace. Der neue `UNKLAR`-Pfad ist damit **nicht** live durchlaufen (er greift erst gegen
+  eine eingespielte Datenbank).
+- **Weiterhin nicht verifiziert: die SQL-Syntax.** Es gibt auf dieser Maschine nach wie vor weder
+  `psql` noch Docker; kein einziges Statement ist gelaufen. Neu hinzugekommen und deshalb beim
+  ersten Einspielen besonders zu beachten:
+  `default auth.uid()` auf sechs Spalten (Default-Ausdrücke dürfen Funktionen aufrufen, `auth.uid()`
+  ist `stable` – zulässig), die Zeilenvergleiche `(new.session_id, new.player_id, new.type) is
+  distinct from (…)`, `least(…)` über zwei `bigint`, die beiden `left join
+  jsonb_to_recordset(…)` auf dieselbe `lines`-Liste in der Transfer-Richtungsprüfung, sowie
+  `raise exception … using errcode = …, detail = …` mit zusammengesetztem Text.
+
+### Was der Planer nach dem Einspielen zusätzlich prüfen sollte
+
+1. `select column_name from information_schema.columns where table_name = 'settlements';` –
+   `uncovered_debts_cents` muss dabei sein.
+2. Einen Spieler anlegen und `select created_by from public.players;` – dort muss die eigene
+   Nutzer-ID stehen, auch wenn der Client etwas anderes schickt (F4).
+3. Eine Session schließen und wieder öffnen: danach `closed_at`, `closed_by`,
+   `discrepancy_cents` = `null`, `close_note` mit angehängtem Grund, und im `audit_log` die
+   alten Werte in `old_data` (F5).
+4. `npm run rls:smoke` – erst wenn Daten in der Datenbank liegen (nach WP2/WP4), ist das
+   Ergebnis vollständig beweiskräftig; bis dahin auf die `UNKLAR`-Zeilen achten (F7).
+
+### Offene Punkte aus Gabys F2, die bewusst offen bleiben
+
+Der Planer hat für F2 vier Prüfungen (a)–(d) entschieden; die restlichen Vorschläge aus Gabys
+Bericht sind **nicht** umgesetzt und damit weiterhin nur durch `computeSettlement` gedeckt:
+`cashTier3 = 0` für Bar-Zahler und `cashTier1 = cashTier2 = 0` für Listen-Spieler, sowie die
+volle Bedienung der Stufe 1, wenn die Kasse reicht (Invariante 5). Ein manipulierter Client
+könnte einem Bar-Zahler seinen Anspruch über `cashTier3` statt über `cashTier1/2` zuteilen –
+die Summen und alle jetzt geprüften Invarianten blieben dabei heil. Gehört nach WP6, wenn es
+gewollt ist.

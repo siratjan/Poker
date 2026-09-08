@@ -7,11 +7,17 @@
  * Runs against the cloud project from .env.local. It never logs in, so it can
  * only ever see what RLS lets `anon` see — which must be nothing.
  *
- * A check passes when the request is BLOCKED, which the API expresses in two
- * equally valid ways:
- *   - an error (permission denied / RLS violation), or
- *   - an empty result set (policy filtered everything away).
- * It fails when rows come back or a write succeeds.
+ * A check passes when the request is BLOCKED. The API expresses that in two
+ * ways, and they are NOT equally strong:
+ *   - an error (permission denied / RLS violation) — conclusive, and the only
+ *     correct outcome here, because 0003 revokes every right from `anon`;
+ *   - an empty result set — inconclusive on its own: an unprotected table in an
+ *     empty database returns 0 rows just as well. Those are reported as
+ *     "vermutlich geblockt" and never counted as proof.
+ * `settings` is the exception: 0001 seeds `quick_amounts_cents`, so the table
+ * is guaranteed to hold a row. 0 rows there really means "filtered away" and is
+ * marked as the conclusive check.
+ * A check fails when rows come back or a write succeeds.
  *
  * If the migrations were never applied, every table reports "does not exist".
  * The script then says so in one clear sentence and exits 1 instead of
@@ -63,13 +69,20 @@ const supabase = createClient(url, key, {
 // result plumbing
 // ---------------------------------------------------------------------------
 
-type Verdict = 'blocked' | 'leak' | 'missing';
+type Verdict = 'blocked' | 'unproven' | 'leak' | 'missing';
 
 type Check = {
   what: string;
   verdict: Verdict;
   detail: string;
 };
+
+/**
+ * Tables that always contain at least one row once the migrations ran, so an
+ * empty answer proves that the request really was filtered away.
+ * `settings` is seeded by 0001 (quick_amounts_cents).
+ */
+const GUARANTEED_NON_EMPTY: ReadonlySet<string> = new Set(['settings']);
 
 const checks: Check[] = [];
 
@@ -90,7 +103,13 @@ function isMissing(error: PostgrestErrorLike): boolean {
   );
 }
 
-function record(what: string, error: PostgrestErrorLike, rowCount: number | null): void {
+function record(
+  what: string,
+  error: PostgrestErrorLike,
+  rowCount: number | null,
+  /** true when an empty answer is proof, because the table is never empty */
+  conclusiveWhenEmpty = false,
+): void {
   if (isMissing(error)) {
     checks.push({ what, verdict: 'missing', detail: error?.message ?? 'not found' });
     return;
@@ -100,7 +119,19 @@ function record(what: string, error: PostgrestErrorLike, rowCount: number | null
     return;
   }
   if (rowCount === null || rowCount === 0) {
-    checks.push({ what, verdict: 'blocked', detail: '0 Zeilen' });
+    if (conclusiveWhenEmpty) {
+      checks.push({
+        what,
+        verdict: 'blocked',
+        detail: '0 Zeilen, obwohl die Tabelle nach dem Seed eine hat — beweiskräftig',
+      });
+      return;
+    }
+    checks.push({
+      what,
+      verdict: 'unproven',
+      detail: '0 Zeilen ohne Fehler — vermutlich geblockt, aber nicht beweiskräftig',
+    });
     return;
   }
   checks.push({ what, verdict: 'leak', detail: `${rowCount} Zeile(n) sichtbar` });
@@ -142,6 +173,7 @@ const INSERT_PAYLOAD: Record<string, Record<string, unknown>> = {
     cash_box_after_payouts_cents: 0,
     unallocated_cash_cents: 0,
     uncovered_claims_cents: 0,
+    uncovered_debts_cents: 0,
   },
   settlement_lines: {
     session_id: '00000000-0000-4000-8000-000000000002',
@@ -178,7 +210,12 @@ const INSERT_PAYLOAD: Record<string, Record<string, unknown>> = {
 async function run(): Promise<void> {
   for (const table of TABLE_NAMES) {
     const read = await supabase.from(table).select('*').limit(5);
-    record(`select ${table}`, read.error, read.data ? read.data.length : null);
+    record(
+      `select ${table}`,
+      read.error,
+      read.data ? read.data.length : null,
+      GUARANTEED_NON_EMPTY.has(table),
+    );
 
     const write = await supabase.from(table).insert(INSERT_PAYLOAD[table]).select();
     if (write.error) {
@@ -208,6 +245,11 @@ async function run(): Promise<void> {
     },
     { name: 'is_admin', args: {} },
     { name: 'is_editor', args: {} },
+    { name: 'current_app_role', args: {} },
+    {
+      name: 'session_is_open',
+      args: { p_session_id: '00000000-0000-4000-8000-000000000002' },
+    },
   ];
 
   for (const rpc of rpcs) {
@@ -232,7 +274,12 @@ async function run(): Promise<void> {
 
 function report(): number {
   const width = Math.max(...checks.map((c) => c.what.length));
-  const icon: Record<Verdict, string> = { blocked: 'OK  ', leak: 'LECK', missing: 'FEHLT' };
+  const icon: Record<Verdict, string> = {
+    blocked: 'OK  ',
+    unproven: 'UNKLAR',
+    leak: 'LECK',
+    missing: 'FEHLT',
+  };
 
   for (const check of checks) {
     console.log(`${icon[check.verdict].padEnd(6)} ${check.what.padEnd(width)}  ${check.detail}`);
@@ -240,11 +287,14 @@ function report(): number {
 
   const leaks = checks.filter((c) => c.verdict === 'leak');
   const missing = checks.filter((c) => c.verdict === 'missing');
+  const unproven = checks.filter((c) => c.verdict === 'unproven');
+  const blocked = checks.length - leaks.length - missing.length - unproven.length;
 
   console.log('');
   console.log(
-    `${checks.length} Prüfungen · ${checks.length - leaks.length - missing.length} geblockt · ` +
-      `${leaks.length} Leck(s) · ${missing.length} nicht vorhanden`,
+    `${checks.length} Prüfungen · ${blocked} beweisbar geblockt · ` +
+      `${unproven.length} unklar · ${leaks.length} Leck(s) · ` +
+      `${missing.length} nicht vorhanden`,
   );
 
   if (missing.length > 0) {
@@ -267,8 +317,26 @@ function report(): number {
     return 1;
   }
 
+  if (unproven.length > 0) {
+    console.log('');
+    console.warn(
+      `UNKLAR: ${unproven.length} Prüfung(en) lieferten 0 Zeilen ohne Fehler:\n` +
+        unproven.map((u) => `  - ${u.what}`).join('\n') +
+        '\nDas ist kein Beweis: eine ungeschützte Tabelle in einer leeren Datenbank\n' +
+        'antwortet genauso. Erwartet wäre ein Fehler (42501), weil 0003 der Rolle anon\n' +
+        'jedes Recht entzieht. Beweiskräftig ist in dieser Liste nur `select settings`\n' +
+        '(0001 legt dort quick_amounts_cents an, die Tabelle ist also nie leer) sowie\n' +
+        'jede Zeile mit einer Fehlermeldung. Endgültig belegt ist das Ergebnis erst\n' +
+        'mit Daten in der Datenbank — spätestens nach WP2/WP4 erneut laufen lassen.',
+    );
+  }
+
   console.log('');
-  console.log('OK: Ohne Login ist nichts lesbar und nichts schreibbar.');
+  console.log(
+    unproven.length === 0
+      ? 'OK: Ohne Login ist nichts lesbar und nichts schreibbar.'
+      : 'OK mit Einschränkung: kein Zugriff möglich, aber nicht jede Zeile ist beweiskräftig (siehe oben).',
+  );
   return 0;
 }
 

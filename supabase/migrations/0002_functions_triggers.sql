@@ -174,6 +174,68 @@ create trigger protect_app_user_columns_trg
   for each row execute function public.protect_app_user_columns();
 
 -- -----------------------------------------------------------------------------
+-- Who recorded this? (SPEC 4: "immer mit Zeitstempel und erfassendem Nutzer")
+-- The column has `default auth.uid()`, but a client may still send a value of
+-- its own; on INSERT this trigger overwrites it, so the recorder shown in the
+-- history is always the authenticated caller. UPDATE never touches created_by.
+-- auth.uid() is null in the SQL editor / seed — that path keeps the given value
+-- so the planner can bootstrap rows by hand (same rule as
+-- protect_app_user_columns above).
+-- -----------------------------------------------------------------------------
+
+create or replace function public.stamp_actor()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  if tg_table_name = 'players' then
+    new.created_by := auth.uid();
+  elsif tg_table_name = 'sessions' then
+    new.created_by := auth.uid();
+  elsif tg_table_name = 'session_players' then
+    new.added_by := auth.uid();
+  elsif tg_table_name = 'entries' then
+    new.created_by := auth.uid();
+  elsif tg_table_name = 'settings' then
+    new.updated_by := auth.uid();
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists stamp_players on public.players;
+create trigger stamp_players
+  before insert on public.players
+  for each row execute function public.stamp_actor();
+
+drop trigger if exists stamp_sessions on public.sessions;
+create trigger stamp_sessions
+  before insert on public.sessions
+  for each row execute function public.stamp_actor();
+
+drop trigger if exists stamp_session_players on public.session_players;
+create trigger stamp_session_players
+  before insert on public.session_players
+  for each row execute function public.stamp_actor();
+
+drop trigger if exists stamp_entries on public.entries;
+create trigger stamp_entries
+  before insert on public.entries
+  for each row execute function public.stamp_actor();
+
+-- settings.updated_by is an "who changed it last", so it is stamped on update too
+drop trigger if exists stamp_settings on public.settings;
+create trigger stamp_settings
+  before insert or update on public.settings
+  for each row execute function public.stamp_actor();
+
+-- -----------------------------------------------------------------------------
 -- updated_at
 -- -----------------------------------------------------------------------------
 
@@ -339,6 +401,17 @@ begin
   end if;
   if v_status <> 'open' then
     raise exception 'SESSION_CLOSED' using errcode = 'P0001';
+  end if;
+
+  -- (f) an update may never re-point an entry: session, player and type are
+  -- part of its identity. Otherwise a cash buy-in could be moved to another
+  -- session (the cash box check below would only see the new side) or a
+  -- cash_out could be hung onto another player. The app never needs this;
+  -- WP5 only knows updateCashOut and deleteEntry.
+  if tg_op = 'UPDATE'
+     and (new.session_id, new.player_id, new.type)
+         is distinct from (old.session_id, old.player_id, old.type) then
+    raise exception 'ENTRY_IMMUTABLE_KEYS' using errcode = 'P0001';
   end if;
 
   -- amounts moved by this statement (NEW is not assigned on DELETE)
@@ -593,6 +666,11 @@ declare
   v_from_box      bigint;
   v_transfers     bigint;
   v_pos_residual  bigint;
+  v_neg_residual  bigint;
+  v_tier3         bigint;
+  v_unallocated   integer;
+  v_uncov_claims  integer;
+  v_uncov_debts   integer;
 begin
   if not public.is_editor() then
     raise exception 'FORBIDDEN' using errcode = 'P0001';
@@ -649,9 +727,14 @@ begin
      or (p_settlement ->> 'cashBoxStart')::integer        is distinct from v_cash
      or (p_settlement ->> 'cashBoxAfterPayouts')::integer is distinct from (v_cash - v_payout)
      or coalesce((p_settlement ->> 'unallocatedCash')::integer, -1) < 0
-     or coalesce((p_settlement ->> 'uncoveredClaims')::integer, -1) < 0 then
+     or coalesce((p_settlement ->> 'uncoveredClaims')::integer, -1) < 0
+     or coalesce((p_settlement ->> 'uncoveredDebts')::integer, -1) < 0 then
     raise exception 'SETTLEMENT_MISMATCH' using errcode = 'P0001';
   end if;
+
+  v_unallocated  := (p_settlement ->> 'unallocatedCash')::integer;
+  v_uncov_claims := (p_settlement ->> 'uncoveredClaims')::integer;
+  v_uncov_debts  := (p_settlement ->> 'uncoveredDebts')::integer;
 
   -- exactly one line per participant, no duplicates
   select count(distinct l."playerId") into v_lines
@@ -711,21 +794,97 @@ begin
   end if;
 
   -- ---- invariants of docs/SETTLEMENT.md -----------------------------------
-  select coalesce(sum(l."cashFromBox"), 0), coalesce(sum(greatest(l."residual", 0)), 0)
-    into v_from_box, v_pos_residual
+  select coalesce(sum(l."cashFromBox"), 0),
+         coalesce(sum(greatest(l."residual", 0)), 0),
+         coalesce(sum(greatest(-l."residual", 0)), 0),
+         coalesce(sum(l."cashTier3"), 0)
+    into v_from_box, v_pos_residual, v_neg_residual, v_tier3
     from jsonb_to_recordset(p_settlement -> 'lines')
-      as l("cashFromBox" integer, "residual" integer);
+      as l("cashFromBox" integer, "residual" integer, "cashTier3" integer);
 
+  -- invariant 2: the cash box is fully accounted for
   if v_from_box + (p_settlement ->> 'unallocatedCash')::integer <> (v_cash - v_payout) then
-    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001';
+    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+      detail = 'Kasseninvariante verletzt: Summe cashFromBox + unallocatedCash '
+               || 'entspricht nicht Summe cash buy_in - Summe payout.';
   end if;
 
   select coalesce(sum(t."amount"), 0) into v_transfers
     from jsonb_to_recordset(coalesce(p_settlement -> 'transfers', '[]'::jsonb))
       as t("amount" integer);
 
+  -- step 5: what the greedy could not settle is reported, not transferred
   if v_transfers + (p_settlement ->> 'uncoveredClaims')::integer <> v_pos_residual then
-    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001';
+    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+      detail = 'Summe Überweisungen + uncoveredClaims entspricht nicht der Summe '
+               || 'der positiven Residuen.';
+  end if;
+
+  if v_transfers + v_uncov_debts <> v_neg_residual then
+    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+      detail = 'Summe Überweisungen + uncoveredDebts entspricht nicht der Summe '
+               || 'der negativen Residuen.';
+  end if;
+
+  -- step 5: the greedy runs until one of the two sides is empty, so it moves
+  -- exactly min(sum positive residual, sum |negative residual|)
+  if v_transfers <> least(v_pos_residual, v_neg_residual) then
+    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+      detail = 'Summe der Überweisungen ist nicht min(Summe positive Residuen, '
+               || 'Summe negative Residuen).';
+  end if;
+
+  -- step 5: a transfer always runs from a debtor (residual < 0) to a creditor
+  -- (residual > 0); both must be lines of this settlement
+  if exists (
+    select 1
+    from jsonb_to_recordset(coalesce(p_settlement -> 'transfers', '[]'::jsonb))
+      as t("fromPlayerId" uuid, "toPlayerId" uuid, "amount" integer)
+    left join jsonb_to_recordset(p_settlement -> 'lines')
+      as lf("playerId" uuid, "residual" integer) on lf."playerId" = t."fromPlayerId"
+    left join jsonb_to_recordset(p_settlement -> 'lines')
+      as lt("playerId" uuid, "residual" integer) on lt."playerId" = t."toPlayerId"
+    where t."amount" is null or t."amount" <= 0
+       or lf."playerId" is null or lt."playerId" is null
+       or lf."residual" >= 0 or lt."residual" <= 0
+  ) then
+    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+      detail = 'Überweisung läuft nicht von einem Schuldner (residual < 0) an einen '
+               || 'Gläubiger (residual > 0).';
+  end if;
+
+  -- invariant 6 ("Bargeld zuerst an Bar-Zahler"): as long as one cash payer has
+  -- an open claim, no list player may receive cash from the box
+  if v_tier3 > 0 and exists (
+    select 1
+    from jsonb_to_recordset(p_settlement -> 'lines')
+      as l("isCashPlayer" boolean, "cashFromBox" integer, "claim" integer)
+    where l."isCashPlayer" and l."cashFromBox" is distinct from l."claim"
+  ) then
+    raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+      detail = 'Listen-Spieler bekommt Bargeld (cashTier3 > 0), obwohl ein Bar-Zahler '
+               || 'noch einen offenen Anspruch hat.';
+  end if;
+
+  -- step 5: how the difference must show up in the three reported leftovers
+  if v_discrepancy = 0 then
+    if v_unallocated <> 0 or v_uncov_claims <> 0 or v_uncov_debts <> 0 then
+      raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+        detail = 'Bei Differenz 0 müssen unallocatedCash, uncoveredClaims und '
+                 || 'uncoveredDebts alle 0 sein.';
+    end if;
+  elsif v_discrepancy < 0 then
+    if v_uncov_claims <> 0 or v_unallocated + v_uncov_debts <> -v_discrepancy then
+      raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+        detail = 'Bei negativer Differenz muss unallocatedCash + uncoveredDebts = '
+                 || '-discrepancy gelten und uncoveredClaims 0 sein.';
+    end if;
+  else
+    if v_unallocated <> 0 or v_uncov_debts <> 0 or v_uncov_claims <> v_discrepancy then
+      raise exception 'SETTLEMENT_INVARIANT' using errcode = 'P0001',
+        detail = 'Bei positiver Differenz muss uncoveredClaims = discrepancy gelten '
+                 || 'und unallocatedCash sowie uncoveredDebts 0 sein.';
+    end if;
   end if;
 
   -- ---- discrepancy needs an admin and a comment (SPEC 5.5) ----------------
@@ -740,15 +899,14 @@ begin
     session_id, algorithm_version, computed_by,
     total_buy_in_cents, total_stack_cents, discrepancy_cents,
     cash_box_start_cents, cash_box_after_payouts_cents,
-    unallocated_cash_cents, uncovered_claims_cents
+    unallocated_cash_cents, uncovered_claims_cents, uncovered_debts_cents
   ) values (
     p_session_id,
     (p_settlement ->> 'algorithmVersion')::integer,
     auth.uid(),
     v_buy_in, v_stack, v_discrepancy,
     v_cash, v_cash - v_payout,
-    (p_settlement ->> 'unallocatedCash')::integer,
-    (p_settlement ->> 'uncoveredClaims')::integer
+    v_unallocated, v_uncov_claims, v_uncov_debts
   );
 
   insert into public.settlement_lines (
@@ -810,7 +968,10 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- reopen_session — admin only; drops the frozen settlement (SPEC 4 / 5.6).
--- The previous close_note stays visible in audit_log.old_data.
+-- closed_at / closed_by / discrepancy_cents are reset to null: the session is
+-- open again and those columns describe a closed one. Their old values stay in
+-- audit_log.old_data, so the history of repeated closings remains complete
+-- (SPEC 4). close_note survives with the reason appended.
 -- -----------------------------------------------------------------------------
 
 drop function if exists public.reopen_session(uuid, text);
@@ -851,9 +1012,12 @@ begin
   perform set_config('app.session_transition', 'on', true);
 
   update public.sessions s
-     set status      = 'open',
-         reopened_at = now(),
-         reopened_by = auth.uid(),
+     set status            = 'open',
+         reopened_at       = now(),
+         reopened_by       = auth.uid(),
+         closed_at         = null,
+         closed_by         = null,
+         discrepancy_cents = null,
          close_note  = coalesce(s.close_note, '')
                        || case when coalesce(s.close_note, '') = '' then '' else E'\n' end
                        || '[wieder geöffnet: ' || v_reason || ']'
@@ -882,3 +1046,18 @@ grant execute on function public.current_app_role()               to authenticat
 grant execute on function public.is_admin()                       to authenticated;
 grant execute on function public.is_editor()                      to authenticated;
 grant execute on function public.session_is_open(uuid)            to authenticated;
+
+-- Trigger functions are never called directly ("trigger functions can only be
+-- called as triggers"). PostgreSQL grants EXECUTE to public by default, which
+-- would be the only place in this file where a role keeps a right it does not
+-- need — the permission for a trigger is checked at CREATE TRIGGER time, not
+-- when it fires, so revoking here changes nothing for the triggers themselves.
+revoke all on function public.handle_new_auth_user()          from public, anon, authenticated;
+revoke all on function public.protect_last_admin()            from public, anon, authenticated;
+revoke all on function public.protect_app_user_columns()      from public, anon, authenticated;
+revoke all on function public.stamp_actor()                   from public, anon, authenticated;
+revoke all on function public.touch_updated_at()              from public, anon, authenticated;
+revoke all on function public.audit_row_change()              from public, anon, authenticated;
+revoke all on function public.validate_entry()                from public, anon, authenticated;
+revoke all on function public.validate_session_update()       from public, anon, authenticated;
+revoke all on function public.validate_session_player_delete() from public, anon, authenticated;

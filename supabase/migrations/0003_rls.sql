@@ -119,7 +119,19 @@ create policy sessions_select on public.sessions
 
 drop policy if exists sessions_insert on public.sessions;
 create policy sessions_insert on public.sessions
-  for insert to authenticated with check (public.is_editor() and status = 'open');
+  for insert to authenticated with check (
+    public.is_editor()
+    and status = 'open'
+    -- a brand new session carries no closing data; validate_session_update()
+    -- only guards UPDATE, so without this an editor could invent a difference
+    -- and a closing comment while creating the row
+    and closed_at is null
+    and closed_by is null
+    and discrepancy_cents is null
+    and close_note is null
+    and reopened_at is null
+    and reopened_by is null
+  );
 
 drop policy if exists sessions_update on public.sessions;
 create policy sessions_update on public.sessions

@@ -75,7 +75,7 @@ create table if not exists public.players (
   id              uuid primary key default gen_random_uuid(),
   name            text not null check (length(trim(name)) between 1 and 40),
   name_normalized text generated always as (lower(trim(name))) stored,
-  created_by      uuid references public.app_users (id),
+  created_by      uuid default auth.uid() references public.app_users (id),
   created_at      timestamptz not null default now()
 );
 
@@ -91,7 +91,7 @@ create table if not exists public.sessions (
   played_on         date not null default current_date,
   name              text check (length(name) <= 60),
   status            public.session_status not null default 'open',
-  created_by        uuid references public.app_users (id),
+  created_by        uuid default auth.uid() references public.app_users (id),
   created_at        timestamptz not null default now(),
   closed_at         timestamptz,
   closed_by         uuid references public.app_users (id),
@@ -112,7 +112,7 @@ create table if not exists public.session_players (
   session_id uuid not null references public.sessions (id) on delete cascade,
   player_id  uuid not null references public.players (id) on delete restrict,
   position   integer not null,
-  added_by   uuid references public.app_users (id),
+  added_by   uuid default auth.uid() references public.app_users (id),
   added_at   timestamptz not null default now(),
   primary key (session_id, player_id),
   unique (session_id, position)
@@ -132,7 +132,7 @@ create table if not exists public.entries (
   amount_cents integer not null,
   payment      public.payment_method,
   note         text check (length(note) <= 200),
-  created_by   uuid references public.app_users (id),
+  created_by   uuid default auth.uid() references public.app_users (id),
   created_at   timestamptz not null default now(),
   foreign key (session_id, player_id)
     references public.session_players (session_id, player_id) on delete cascade,
@@ -164,14 +164,15 @@ create table if not exists public.settlements (
   session_id                    uuid primary key references public.sessions (id) on delete cascade,
   algorithm_version             integer not null,
   computed_at                   timestamptz not null default now(),
-  computed_by                   uuid references public.app_users (id),
+  computed_by                   uuid default auth.uid() references public.app_users (id),
   total_buy_in_cents            integer not null,
   total_stack_cents             integer not null,
   discrepancy_cents             integer not null,
   cash_box_start_cents          integer not null,
   cash_box_after_payouts_cents  integer not null,
   unallocated_cash_cents        integer not null,
-  uncovered_claims_cents        integer not null
+  uncovered_claims_cents        integer not null,
+  uncovered_debts_cents         integer not null
 );
 
 -- one row per participant; column names mirror SettlementLine in docs/SETTLEMENT.md
@@ -219,7 +220,7 @@ create table if not exists public.settings (
   key        text primary key,
   value      jsonb not null,
   updated_at timestamptz not null default now(),
-  updated_by uuid references public.app_users (id)
+  updated_by uuid default auth.uid() references public.app_users (id)
 );
 
 insert into public.settings (key, value)

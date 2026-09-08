@@ -474,6 +474,7 @@ export type Database = {
           cash_box_after_payouts_cents: number;
           unallocated_cash_cents: number;
           uncovered_claims_cents: number;
+          uncovered_debts_cents: number;
         };
         Insert: {
           session_id: string;
@@ -487,6 +488,7 @@ export type Database = {
           cash_box_after_payouts_cents: number;
           unallocated_cash_cents: number;
           uncovered_claims_cents: number;
+          uncovered_debts_cents: number;
         };
         Update: {
           session_id?: string;
@@ -500,6 +502,7 @@ export type Database = {
           cash_box_after_payouts_cents?: number;
           unallocated_cash_cents?: number;
           uncovered_claims_cents?: number;
+          uncovered_debts_cents?: number;
         };
         Relationships: [
           {
