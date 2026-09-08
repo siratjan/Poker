@@ -316,3 +316,4 @@ Transfers: B → A 10. uncoveredClaims = 10.
 - Negativer Betrag → `NEGATIVE_AMOUNT`
 - Nicht-ganzzahliger Betrag → `NON_INTEGER_AMOUNT`
 - Doppelte `playerId` → `DUPLICATE_PLAYER`
+- Fehlende, nicht-ganzzahlige oder doppelte `position` → `INVALID_POSITION` (`position` ist Pflicht; sie ist die Beitrittsreihenfolge aus `session_players`)
