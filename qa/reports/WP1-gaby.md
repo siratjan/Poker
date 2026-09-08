@@ -1,8 +1,15 @@
 # WP1 – Prüfbericht Gaby
 
-**Urteil: NACHARBEIT** (1 Major, 9 Minor, 0 Blocker)
+**Urteil nach Runde 2: FREIGEGEBEN mit Hinweisen** (0 Blocker, 0 Major, 1 neuer Minor)
 
-Geprüfter Stand: `bc7aa02` „WP1: database schema, RLS, triggers“ (Arbeitsbaum auf `main`,
+Alle zehn Findings aus Runde 1 sind abgearbeitet, der Major **F1 ist behoben**. Details,
+Befehle und die Bewertung der drei geänderten Test-Literale stehen unten im Abschnitt
+**„Runde 2“**; die Freigabe steht weiterhin unter dem Vorbehalt des Abschnitts
+**„Nicht verifiziert“** – es ist nach wie vor kein einziger SQL-Befehl gelaufen.
+
+*Urteil Runde 1 (historisch): NACHARBEIT (1 Major, 9 Minor, 0 Blocker).*
+
+Geprüfter Stand Runde 1: `bc7aa02` „WP1: database schema, RLS, triggers“ (Arbeitsbaum auf `main`,
 HEAD zum Prüfzeitpunkt `8202d89`; die WP3-Commits dazwischen betreffen `src/lib/settlement/**`
 und `docs/SETTLEMENT.md`).
 
@@ -446,20 +453,247 @@ Das ist der wichtigste Abschnitt dieses Berichts. **Nichts davon gilt als bestan
 
 ### Konkret nachzuholen, direkt nach dem ersten Einspielen (Planer)
 
+*Stand nach Runde 2 – die Punkte 6–9 sind wegen der Nacharbeit dazugekommen.*
+
 1. Die Ausgaben von 0001–0004 einzeln lesen; jede `notice` ernst nehmen (besonders bei 0004).
+   Neu in Runde 2 und deshalb besonders zu beobachten: die sechs `default auth.uid()` in 0001,
+   die fünf `stamp_*`-Trigger und die neun `revoke all on function` am Ende von 0002.
 2. Siris Sichtprüfung (Handoff Schritt 8): 11 Tabellen mit `relrowsecurity = true`, 28 Policies.
+   Ergänzt: **20** Trigger und **16** Funktionen (Runde 2), nicht mehr 15/15.
 3. Zusätzlich die `anon`-Grant-Abfrage aus Punkt 8 oben – Ergebnis muss leer sein.
-4. `npm run rls:smoke` – jede Zeile `OK`, Exit-Code 0.
+4. `npm run rls:smoke` – **29** Prüfungen (nicht mehr 27), keine Zeile `LECK`, keine `FEHLT`,
+   Exit-Code 0. `UNKLAR`-Zeilen sind kein Beweis: sie verschwinden erst, wenn Daten in der
+   Datenbank liegen (nach WP2/WP4) oder wenn `anon` einen echten Fehler bekommt.
 5. Kurzer Live-Gegentest mit zwei Konten, sobald WP2 steht: Viewer versucht einen Buy-in
    (muss 42501 geben), Editor versucht `update sessions set status='closed'` (muss `USE_RPC`
    geben). Erst dann sind die Zeilen a–n der Angriffstabelle wirklich belegt.
+6. **F1:** `select column_name from information_schema.columns where table_name = 'settlements';`
+   → `uncovered_debts_cents` muss dabei sein. Danach einmal eine Session mit Differenz
+   abschließen (TV9b-Muster: nur Listen-Spieler, Chips fehlen) und prüfen, dass der Wert
+   gespeichert ankommt.
+7. **F4:** Als Editor einen Spieler anlegen und dabei absichtlich ein fremdes `created_by`
+   mitschicken → `select created_by from public.players;` muss die **eigene** Nutzer-ID zeigen.
+   Zusätzlich im SQL-Editor (ohne Login, `auth.uid()` ist null) eine Zeile einfügen: sie muss
+   durchgehen, `created_by` bleibt dabei leer.
+8. **F5:** Eine Session schließen und wieder öffnen: danach `closed_at`, `closed_by`,
+   `discrepancy_cents` = `null`, `close_note` mit angehängtem Grund, und im `audit_log` die
+   alten Werte in `old_data`.
+9. **F3/F6:** Als Editor per PostgREST einen Eintrag auf eine andere Session umhängen
+   (muss `ENTRY_IMMUTABLE_KEYS` geben) und eine Session mit gesetztem `discrepancy_cents`
+   anlegen (muss 42501 geben).
 
 ---
 
 ## Runde 2
 
-Offen – noch keine Nacharbeit geprüft.
+**Urteil: FREIGEGEBEN mit Hinweisen.** Geprüfter Stand: `05d4197` „WP1: address review findings
+(round 2)“ (HEAD, Arbeitsbaum sauber bis auf meine neue Testdatei). Alle zehn Findings sind
+abgearbeitet, keines ist nur behauptet. Ein neuer Minor (**F11**) ist beim Nachprüfen von F4
+aufgefallen. Der Vorbehalt aus „Nicht verifiziert“ gilt unverändert: es ist immer noch kein
+einziger SQL-Befehl gelaufen.
 
-Zur Freigabe reicht F1 (drei Zeilen: Spalte, `close_session`, `database.types.ts`). Die neun
-Minor-Findings sind Verbesserungen; F2, F3 und F5 sollten vor WP6 entschieden werden, F4 und F6
-vor WP4/WP5, F7 vor dem ersten echten `rls:smoke`-Lauf.
+### Durchgeführt
+
+| Befehl | Ergebnis |
+|---|---|
+| `git show 05d4197 --stat` | 8 Dateien, +1493/−42; keine Datei außerhalb von `supabase/`, `scripts/`, `src/lib/database.types.ts`, `qa/`, `tests/gaby/` |
+| `npm run check` (vor meiner neuen Testdatei) | **grün** – typecheck ok, ESLint ohne Ausgabe, 217 Tests in 9 Dateien, 846 ms |
+| `npm run build` | **grün** – `/` und `/_not-found` statisch, `Proxy (Middleware)` aktiv; einzige Ausgabe weiterhin die bekannte `middleware`-Deprecation aus WP0 |
+| `npm run rls:smoke` | **wie erwartet rot**: „29 Prüfungen · 0 beweisbar geblockt · 0 unklar · 0 Leck(s) · 29 nicht vorhanden“, danach die Klartextmeldung „ABBRUCH: Tabellen/Funktionen existieren nicht → die Migrationen sind noch nicht eingespielt“ mit Verweis auf die Anleitung, **Exit-Code 1**, kein Stacktrace |
+| `grep -c "create trigger"` / `^create … function public\.` / `raise exception '[A-Z_]*'` in `0002` | **20** / **16** / **22** – die drei geänderten Literale stimmen mit der Datei überein |
+| `grep -i "@" supabase/seed.sql` | keine Treffer (Exit 1) – genau das, was Siris korrigierter Prüfschritt 5 jetzt ankündigt |
+| `npm run check` (nach meiner neuen Testdatei) | **grün** – 251 Tests in 10 Dateien, 908 ms |
+
+**Neue eigene Tests: `tests/gaby/wp1-close-session.gaby.test.ts` – 34 Tests, alle grün.**
+
+Die Datei bildet die **Annahmebedingung von `close_session` Zeile für Zeile in TypeScript nach**
+(Kopfzahlen, Zeilenvergleich gegen die serverseitige Aggregation, alle sechs Invarianten aus
+Runde 2) und beantwortet damit die zwei Fragen, die ohne Server sonst offen bleiben:
+
+1. **Weist die RPC eine gültige Abrechnung fälschlich ab?** Das wäre der teure Fehler – der Tisch
+   könnte nicht abrechnen, und die neuen Prüfungen wären ein Blocker statt eines Schutzes.
+   Geprüft gegen alle Pflicht-Testfälle TV1–TV11 aus `docs/SETTLEMENT.md` **und** gegen 3000
+   zufällig erzeugte Sessions (fast-check, Vorbedingungen `payout ≤ stack` und
+   `Σ payout ≤ Σ cashIn`, alle drei Vorzeichen der Differenz). Ergebnis: **kein einziger
+   Fehlalarm.** `computeSettlement` erzeugt nie eine Abrechnung, die `close_session` ablehnen
+   würde. Das ist der wichtigste Befund dieser Runde.
+2. **Fangen die neuen Prüfungen die Angriffe aus F2?** Ja – nachgestellt und abgewiesen werden:
+   die Kernregel-Verletzung aus meiner F2-Reproduktion (Ali 100/Ben 40/**Can 60**) → genau
+   `SETTLEMENT_INVARIANT` „Bar zuerst“; umgedrehte Transfer-Richtung; Empfänger, der gar keine
+   Zeile der Abrechnung ist (die `left join`-Falle); Betrag 0 oder negativ; unterschlagene
+   Überweisungen; verschwiegenes `uncoveredDebts` (TV9b); `uncoveredClaims` als
+   `unallocatedCash` getarnt (TV10); Restbeträge bei sauberer Differenz 0.
+
+Der letzte Abschnitt der Datei friert die Nacharbeit **namentlich** im SQL ein (Spalte,
+`stamp_*`-Trigger, `stamp_actor`-Rumpf, Policy-Zusätze, die neun Revokes, die Regel (f) in
+`validate_entry`). Das ist bewusst die Ergänzung zu den drei hochgezählten Literalen: die
+Zählwerte sagen nur noch *wie viele*, meine neue Datei sagt *welche*.
+
+### Findings aus Runde 1
+
+| # | Grad | Status | Nachgeprüft an |
+|---|---|---|---|
+| **F1** | Major | **✔ behoben** | `0001:175` Spalte `uncovered_debts_cents integer not null`; `close_session` liest `uncoveredDebts` (`0002:737`), verlangt es (`coalesce(…, -1) < 0` → `SETTLEMENT_MISMATCH`, ein **fehlender** Schlüssel fällt dadurch ebenfalls auf), prüft alle drei Gleichungen (`0002:870-888`) und speichert es (`0002:902`); `database.types.ts:477/491/505` in `Row`/`Insert`/`Update`. Round-Trip ist verlustfrei. |
+| **F2** | Minor | **✔ im entschiedenen Umfang (a)–(d)** | Richtung `0002:837-855`, Summe/`min()` `0002:820-836`, „Bar zuerst“ `0002:856-866`. Rest bewusst offen, Bewertung unten. |
+| **F3** | Minor | **✔ behoben** | `0002:409-415` Regel (f), Zeilenvergleich über `(new.session_id, new.player_id, new.type)`; steht **hinter** der Statusprüfung, `SESSION_CLOSED` behält also Vorrang. Der Weg „aus einer geschlossenen Session heraus“ war ohnehin schon durch `entries_update … using session_is_open` (RLS wertet `using` gegen die **alte** Zeile aus) gedeckt – jetzt doppelt. |
+| **F4** | Minor | **✔ behoben, wie beauftragt** | `0001:78/94/115/135/167/223` sechs `default auth.uid()`; `0002:186` `stamp_actor()` + fünf `before insert`-Trigger. Siehe die Detailprüfung unten – und **F11** für den Rest, den F4 nicht adressiert hat. |
+| **F5** | Minor | **✔ behoben** | `0002:1018-1020` setzt `closed_at`, `closed_by`, `discrepancy_cents` auf `null`; `close_note` bleibt und bekommt den Grund angehängt, die alten Werte stehen im `audit_log` (`old_data`). WP6/WP7 dürfen `sessions.discrepancy_cents` jetzt ohne Statusblick lesen. |
+| **F6** | Minor | **✔ behoben** | `0003:120-134`: `sessions_insert` verlangt zusätzlich `closed_at/closed_by/discrepancy_cents/close_note/reopened_at/reopened_by is null`. |
+| **F7** | Minor | **✔ behoben** | `scripts/rls-smoke.ts`: neues Urteil `UNKLAR`, `settings` als beweiskräftiger Fall (0001 legt dort `quick_amounts_cents` an), `current_app_role` und `session_is_open` ergänzt → 29 Prüfungen, ausgeführt und gesehen. Schlusszeile unterscheidet „OK“ von „OK mit Einschränkung“. |
+| **F8** | Minor | **✔ behoben** | Handoff-Tabelle hat die drei fehlenden Regeln als Zeilen 38–40 und die Runde-2-Regeln 41–46; Zeile 24 ist auf „die aus der Aggregation ableitbaren Werte“ präzisiert. Stichprobe auf die Fundstellen der neuen Zeilen: alle sechs stimmen. |
+| **F9** | Minor | **✔ behoben** | `0002:1055-1063`: `revoke all on function … from public, anon, authenticated` für **neun** Trigger-Funktionen (acht plus das neue `stamp_actor`). Die Trigger feuern weiter – das Ausführungsrecht wird bei `create trigger` geprüft, nicht beim Feuern. |
+| **F10** | Minor | **✔ behoben** | Prüfschritt 5 sagt jetzt „liefert keine Treffer“ und nennt den Grund; nachgestellt: `grep -i "@" supabase/seed.sql` ist leer. |
+
+### Bewertung der drei Literale in `tests/gaby/wp1-schema.gaby.test.ts`
+
+Siri hat in meiner Testdatei genau drei Zahlen/Listeneinträge geändert und das im Commit und im
+Handoff offengelegt. Ich habe jede Änderung gegen die Datei nachgezählt und gegen die Frage
+geprüft, ob sie eine Zusicherung schwächt:
+
+| Änderung | zwingende Folge? | schwächt sie etwas ab? | Urteil |
+|---|---|---|---|
+| Trigger `15 → 20` (`expect(created).toBe(20)`) | **Ja.** F4 verlangte laut meinem eigenen „Erwartet“ ausdrücklich `before insert`-Trigger; es sind exakt die fünf `stamp_*`. `grep -c "create trigger"` = 20. | **Nein.** Die eigentlichen Zusicherungen des Tests sind `dropped === created` und `executed === created` (Idempotenz + `execute function`), und die gelten unverändert für alle 20. Die Zahl ist der Wecker, nicht der Schutz. | **akzeptiert** |
+| Funktionen `15 → 16` (`expect(functionHeaders.length).toBe(16)`) | **Ja.** `stamp_actor()` ist die Trigger-Funktion zu F4. `grep -c` = 16. | **Nein.** Die Schleife darunter prüft *jede* der 16 Funktionen auf `set search_path`; `stamp_actor` trägt `set search_path = public` und ist zu Recht **nicht** `security definer` (sie schreibt nur in `NEW`). Der zweite Test „keine security-definer-Funktion ohne search_path“ ist ebenfalls unverändert. | **akzeptiert** |
+| `KNOWN_ERROR_CODES` 21 → 22 (`ENTRY_IMMUTABLE_KEYS`) | **Ja.** F3 brauchte einen neuen Code, der Name kam vom Planer. | **Nein** – im Gegenteil. Die Zusicherung ist eine **Mengengleichheit** gegen alle `raise exception`-Codes im SQL (`toEqual`), kein „mindestens“: ein Code mehr *oder weniger* lässt den Test fallen. Die Liste ist alphabetisch sortiert, der neue Eintrag steht an der richtigen Stelle und ist kommentiert. Genau der Zweck des Tests – „ein neuer Code erinnert daran, dass WP5 eine deutsche Meldung braucht“ – ist eingelöst: der Fehlercode-Katalog im Handoff steht jetzt auf 22 Einträgen. | **akzeptiert** |
+
+**Zusammengefasst: alle drei Änderungen sind zwingende Folgen der Nacharbeit, keine schwächt eine
+Zusicherung ab, und keine ist heimlich passiert.** Kein Major. Was die Zählwerte an Aussagekraft
+verlieren (sie sagen nicht, *welche* fünf Trigger dazugekommen sind), holt meine neue Datei
+`tests/gaby/wp1-close-session.gaby.test.ts` namentlich nach.
+
+### Detailprüfung der heiklen Stellen
+
+**Die drei Gleichungen aus `docs/SETTLEMENT.md` Schritt 5** (`0002:869-888`) stimmen wortgetreu
+mit dem Dokument überein und sind mit TV9 (−10 → `unallocated 10`, `uncoveredDebts 0`),
+TV9b (−100 → `unallocated 0`, `uncoveredDebts 100`) und TV10 (+10 → `uncoveredClaims 10`) von
+Hand nachgerechnet. `discrepancy = 0` verlangt alle drei auf 0 – das folgt aus
+`Σ residual == 0` (Invariante 3) und ist keine Übererfüllung.
+
+**`Σ transfers = min(Σ pos, Σ neg)`** ist strenger als Invariante 9 (`≤`) – und trotzdem korrekt:
+die Greedy-Schleife in Schritt 5 läuft, bis eine der beiden Listen leer ist, verschiebt also
+exakt das Minimum. Die 3000 Zufallsläufe bestätigen es; ein zu strenger Vergleich wäre hier der
+gefährlichere Fehler gewesen (gültige Abrechnung nicht speicherbar).
+
+**`jsonb_to_recordset` + `left join` (Testauftrag 3):** Die Typen der Spaltenlisten passen zum
+JSON-Vertrag (`"playerId" uuid`, `"residual"/"amount"/"cashTier3"/"claim"/"cashFromBox" integer`,
+`"isCashPlayer" boolean`), alle camelCase-Schlüssel sind gequotet. Die entscheidende Frage – darf
+eine **fehlende** Zeile stillschweigend durchgehen? – ist mit **Nein** beantwortet: die
+`where`-Klausel enthält ausdrücklich `lf."playerId" is null or lt."playerId" is null`
+(`0002:848`), ein Transfer auf einen Nicht-Teilnehmer fliegt also auf, statt per `left join`
+unbemerkt zu verschwinden. Nachgestellt in meinem Test („Empfänger ist gar kein Spieler dieser
+Abrechnung“). Duplikate in `lines` – die den Join vervielfachen würden – sind schon vorher
+ausgeschlossen (`count(distinct) = count(*) = Teilnehmerzahl`, `0002:739-745`). Die beiden
+`left join` auf dieselbe Liste sind unkorreliert, brauchen also kein `lateral`.
+
+**`isCashPlayer`/`claim`/`cashFromBox` in der „Bar zuerst“-Prüfung** stammen aus der
+Client-Zeile, nicht aus der Aggregation – das ist unbedenklich, weil genau diese drei Werte
+zwanzig Zeilen weiter oben gegen die serverseitige Aggregation geprüft wurden. Ein `null` in
+`isCashPlayer` (Schlüssel fehlt) fällt dort ebenfalls auf und nicht erst hier.
+
+**`stamp_actor()` (Testauftrag 4):** Wird `created_by` auch dann gesetzt, wenn der Client einen
+fremden Wert schickt? **Ja** – der Trigger weist `new.created_by := auth.uid()` **unbedingt** zu,
+es ist kein `coalesce` und kein „nur wenn leer“ (im Test festgenagelt). Bleibt der
+SQL-Editor-Pfad heil? **Ja**: bei `auth.uid() is null` gibt die Funktion `NEW` unverändert
+zurück, und **keine** der gestempelten Spalten ist `not null` (`created_by`, `added_by`,
+`computed_by`, `updated_by` sind alle nullable, ebenfalls im Test festgenagelt) – der Planer kann
+also weiter von Hand bootstrappen, ohne dass ein Constraint bricht. `stamp_actor` ist zu Recht
+**kein** `security definer`; das wäre hier eine unnötige Rechteerhöhung gewesen.
+`settings` bekommt den Trigger zusätzlich auf `update`, was zu „`updated_by` = wer zuletzt
+geändert hat“ passt. Trigger-Reihenfolge unkritisch: `stamp_*` sortiert alphabetisch vor
+`validate_*` und `touch_*`, und keine dieser Funktionen liest die gestempelten Spalten.
+
+**SQL-Syntax-Plausibilität der neuen Konstrukte (Testauftrag 8)** – gelesen, kein Fehler
+gefunden, aber wie gehabt nicht ausgeführt:
+
+- `default auth.uid()` in `create table`: zulässig, Default-Ausdrücke dürfen Funktionen
+  aufrufen; `auth.uid()` ist in Supabase `stable` und liefert bei fehlendem JWT `null`
+  (`current_setting(…, true)`), wirft also nicht. Voraussetzung ist, dass das `auth`-Schema beim
+  Lauf von `0001` schon existiert – in einem Supabase-Projekt ist das der Fall.
+- `raise exception 'CODE' using errcode = 'P0001', detail = 'a' || 'b';` – die `using`-Liste ist
+  eine Komma-Folge von `option = expression`, ein zusammengesetzter Text ist damit erlaubt.
+  Wichtig für WP5: der Code bleibt in `message`, der neue Text landet in `detail` – am Mapping
+  in `src/lib/errors/de.ts` ändert sich dadurch nichts.
+- Zeilenvergleich `(a, b, c) is distinct from (d, e, f)` in `validate_entry`: gültige
+  Row-Konstruktor-Syntax, `NULL`-sicher, und `OLD` ist im `tg_op = 'UPDATE'`-Zweig garantiert
+  belegt.
+- `least(v_pos_residual, v_neg_residual)` über zwei `bigint`: typkonsistent.
+- `revoke all on function public.f() from public, anon, authenticated;` – gültig; die Trigger
+  laufen weiter, weil das Ausführungsrecht bei `create trigger` geprüft wird.
+- Unverändert gilt: die `$$`-Quotes sind in allen vier Dateien ausbalanciert (Test), und die
+  neuen Umlaute in den `detail`-Texten sind unkritisch, solange der SQL-Editor UTF-8 überträgt.
+
+### Siris „bewusst offen“ zu F2 – reicht das für die Freigabe?
+
+**Ja, es reicht** – mit einer Präzisierung, die im Bericht stehen soll, damit sie in WP6 nicht
+verloren geht. Begründung:
+
+- Die Quelle der Wahrheit ist der TypeScript-Algorithmus (`computeSettlement`, WP3, in Runde 2
+  freigegeben, mit Property-Tests auf genau diese Invarianten). `close_session` ist die
+  Plausibilitätsschranke gegen einen manipulierten Client, nicht die zweite Implementierung.
+  Die Stufen-Arithmetik (Largest Remainder) in SQL nachzubauen wäre eine zweite Quelle der
+  Wahrheit – das ist teurer und riskanter als die Lücke.
+- Erreichbar ist die Lücke nur für ein Konto mit **Editor-Rechten**, das die RPC von Hand mit
+  einem selbstgebauten JSON aufruft. Die App schickt immer das Ergebnis von `computeSettlement`.
+- Der Rest ist klein geworden: mit (a)–(d) fällt jede Verteilung durch, bei der ein Bar-Zahler
+  Bargeld verliert, *sobald ein Listen-Spieler welches bekommt* – das ist die Kernregel des
+  Auftraggebers und der Fall, den ich in F2 reproduziert hatte.
+
+Präzisierung – die drei Reste sind nicht gleich harmlos:
+
+1. **Harmlos (reine Beschriftung):** `cashTier3 > 0` für einen Bar-Zahler. Da `cashFromBox ≤ claim`
+   erzwungen ist und die „Bar zuerst“-Prüfung `cashFromBox = claim` verlangt, verschiebt das
+   kein Geld – es benennt nur die Stufe falsch, aus der er bedient wurde. In meinem Test belegt.
+2. **Nicht harmlos:** Invariante 5 (Stufe 1 anteilig kürzen, wenn die Kasse nicht reicht).
+   Reicht die Kasse für zwei Bar-Zahler nicht, kann ein manipulierter Aufruf dem einen alles bar
+   geben und den anderen mit einem Schuldschein nach Hause schicken – `Σ cashTier3` bleibt 0, die
+   „Bar zuerst“-Prüfung greift also gar nicht. Das verschiebt echtes Ausfallrisiko zwischen zwei
+   Spielern. Als Test festgehalten („Stufe 1 darf einseitig statt anteilig bedient werden“).
+3. **Nicht harmlos, in F2 genannt, nicht im entschiedenen Umfang (a)–(d) enthalten:** die
+   **Deckung je Spieler** bei Transfers. Richtung und Gesamtsumme stimmen jetzt, aber niemand
+   prüft `Σ ausgehende Transfers je Spieler ≤ |negatives residual|`. Zwei Schuldner à 100 und
+   zwei Gläubiger à 100 lassen sich als „A zahlt 200, B zahlt nichts“ speichern. Ebenfalls als
+   Test festgehalten.
+
+Empfehlung an den Planer: Punkte 2 und 3 als eine Zeile in den WP6-Testauftrag aufnehmen
+(zwei `exists`-Prüfungen, je drei Zeilen SQL). Sie blockieren WP1 nicht.
+
+### F11 – [Minor, neu] `created_by` ist nur beim `insert` geschützt, nicht beim `update`
+
+- **Wo**: `supabase/migrations/0002_functions_triggers.sql:212-231` (`stamp_players`,
+  `stamp_entries` sind `before insert`), `supabase/migrations/0003_rls.sql:103-105`
+  (`players_update`), `0003:180-184` (`entries_update`)
+- **Beobachtet**: F4 ist genau so umgesetzt, wie ich es beauftragt hatte (Default + `before
+  insert`) – und deckt damit den Insert-Weg vollständig ab. Offen bleibt der Update-Weg: ein
+  Editor kann per PostgREST-`PATCH` `players.created_by` bzw. `entries.created_by` einer
+  bestehenden Zeile auf einen **fremden** Nutzer setzen. `validate_entry` prüft seit F3 zwar
+  `session_id`, `player_id` und `type`, aber nicht `created_by`/`created_at`; auf `players` gibt
+  es überhaupt keinen Validierungs-Trigger. Bei `sessions` ist der Fall dagegen sauber gedeckt
+  (`0002:532-536`, `IMMUTABLE_FIELD` für `id`, `created_at`, `created_by`), bei
+  `session_players` gibt es gar keine Update-Policy, und `settings.updated_by` wird auch bei
+  `update` gestempelt. Es fehlen also genau zwei Tabellen.
+- **Erwartet**: Dieselbe Linie wie bei `sessions`. Entweder `stamp_actor` um einen
+  `before update`-Zweig erweitern (`new.created_by := old.created_by; new.created_at :=
+  old.created_at;`) und die Trigger auf `before insert or update` ziehen, oder in `validate_entry`
+  eine Regel (g) mit `IMMUTABLE_FIELD` ergänzen und `players` einen entsprechenden Trigger geben.
+  (Quelle: SPEC §4 „immer mit Zeitstempel und erfassendem Nutzer“; Zeile 44 der Mapping-Tabelle im
+  Handoff sagt „Erfassender Nutzer kommt aus dem Token, nicht vom Client“ – für den Update-Weg
+  ist das heute noch zu stark formuliert.)
+- **Einordnung**: Minor, nicht Blocker. Die Fälschung ist im `audit_log` nachweisbar, weil
+  `audit_row_change` `auth.uid()` selbst liest und die alte Zeile in `old_data` sichert; sichtbar
+  falsch ist zuerst der Verlauf in WP5. Über die geplante UI ist der Fall nicht erreichbar
+  (WP5 kennt nur `updateCashOut` und `deleteEntry`).
+- **Reproduktion**: Statisch: `grep -n "before insert on public.players\|before insert on
+  public.entries" supabase/migrations/0002_functions_triggers.sql` – kein `or update`;
+  `grep -n "created_by" supabase/migrations/0002_functions_triggers.sql` zeigt die
+  `IMMUTABLE_FIELD`-Prüfung nur in `validate_session_update`. Live erst nach dem Einspielen.
+
+### Was für die Freigabe offen bleibt
+
+Nichts, was WP1 aufhält. Zur Erinnerung für spätere Pakete:
+
+- **F11** (oben) – zusammen mit F4 zu Ende bringen, am besten vor WP5 (der Verlauf zeigt den
+  Erfasser).
+- **F2, Reste 2 und 3** – in den WP6-Testauftrag.
+- Der komplette Abschnitt **„Nicht verifiziert“** gilt unverändert; die Checkliste „Konkret
+  nachzuholen, direkt nach dem ersten Einspielen“ ist auf den Stand von Runde 2 gebracht
+  (Punkte 6–9 sind neu).

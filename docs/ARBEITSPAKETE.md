@@ -162,7 +162,8 @@ WP3 kann direkt nach WP0 parallel zu WP1/WP2 laufen.
 9. `src/app/(app)/page.tsx`: vorerst „Eingeloggt als … (Rolle)“ – wird in WP4 ersetzt.
 10. Abmelden: `src/actions/auth.ts` → `supabase.auth.signOut()`, Redirect `/login`.
 11. Migration `supabase/migrations/0005_profile_sync.sql`: Trigger `after update of raw_user_meta_data on auth.users` → aktualisiert `app_users.display_name` und `avatar_url` (nie `role`). Der bestehende Spalten-Schutz-Trigger auf `app_users` muss diesen Pfad zulassen (z. B. über `set_config('app.profile_sync','on', true)` wie bei den Session-RPCs). `database.types.ts` bleibt unverändert.
-12. Commit `WP2: google auth, role plumbing, app shell`.
+12. Gaby-Finding F11 aus WP1 (solange die DB noch nicht eingespielt ist, direkt in `0002` statt neuer Migration): `stamp_actor()` bzw. ein `before update`-Trigger auf `players` und `entries` hält `created_by` unveränderlich (`new.created_by := old.created_by`), damit der Erfasser nicht per Update auf einen fremden Nutzer gesetzt werden kann. Gabys Test `tests/gaby/wp1-schema.gaby.test.ts` darf dabei nur um Trigger-Zählwerte angepasst werden, und nur mit Kommentar.
+13. Commit `WP2: google auth, role plumbing, app shell`.
 
 **DoD**
 
@@ -326,7 +327,8 @@ WP3 kann direkt nach WP0 parallel zu WP1/WP2 laufen.
 - Vergleich: Anzeige nutzt gespeicherte Werte, nicht Neuberechnung? (Code-Review + Test mit manipuliertem Fixture.)
 - Race: Zwei Abschlüsse gleichzeitig → zweiter bekommt `SESSION_CLOSED`/`SETTLEMENT_MISMATCH`, kein Duplikat (PK auf `settlements.session_id`).
 - Share-Text gegen TV2 und TV4: exakt lesbar, Beträge korrekt formatiert.
-- `SettlementView` mit TV8 (Cent-Rundung) und TV9/TV10 (Differenz-Hinweise) als Snapshot-/Text-Test in `tests/gaby/`.
+- `SettlementView` mit TV8 (Cent-Rundung) und TV9/TV9b/TV10 (Differenz-Hinweise; bei TV9b müssen `unallocatedCash` und `uncoveredDebts` beide sichtbar sein) als Snapshot-/Text-Test in `tests/gaby/`.
+- Server Action `closeSession` gegen manipulierte Eingaben: Die DB-Funktion prüft nur Plausibilität (siehe `tests/gaby/wp1-close-session.gaby.test.ts`). Die Action muss die Abrechnung **immer selbst** aus `settlement_input` berechnen und darf nie ein vom Client geliefertes Ergebnis durchreichen. Zusätzlich prüfen: Stufe-1-Kürzung (Invariante 5) und Deckung je Schuldner in den Transfers werden von der DB nicht geprüft; die Action ist hier die einzige Verteidigung.
 
 ---
 

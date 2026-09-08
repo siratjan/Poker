@@ -3,7 +3,7 @@
 | WP | Titel | Siri-Commit | Gaby-Urteil | Planer-Abnahme | Datum |
 |---|---|---|---|---|---|
 | WP0 | Projekt-Setup | 49bc81f | FREIGEGEBEN (Runde 2) | abgenommen, Browser geprüft | 2026-09-08 |
-| WP1 | Datenbank | – | – | – | – |
+| WP1 | Datenbank | 05d4197 | FREIGEGEBEN (Runde 2, 1 Minor → WP2) | Push in DB ausstehend | 2026-09-08 |
 | WP2 | Auth + Rollen | – | – | – | – |
 | WP3 | Abrechnungs-Algorithmus | 9087f54 | FREIGEGEBEN (Runde 2) | abgenommen | 2026-09-08 |
 | WP4 | Spieler + Session-Liste | – | – | – | – |
