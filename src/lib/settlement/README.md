@@ -19,7 +19,7 @@ result.transfers.map((t) => describeTransfer(t, { a: 'Ali', c: 'Can' }));
 
 Alle Beträge sind Integer-Cent. `position` ist die Beitrittsreihenfolge aus `session_players`
 und **Pflicht**: sie muss eine ganze Zahl und je Eingabe eindeutig sein, einen Rückfall auf den
-Array-Index gibt es nicht. Danach wird sekundär nach `name`, tertiär nach `playerId` sortiert.
+Array-Index gibt es nicht. Weitere Sortierschlüssel gibt es nicht; `position` ist eindeutig.
 
 Verletzte Vorbedingungen werfen `SettlementError` mit `code` (`NO_PARTICIPANTS`,
 `PAYOUT_EXCEEDS_STACK`, `PAYOUT_EXCEEDS_CASHBOX`, `NEGATIVE_AMOUNT`, `NON_INTEGER_AMOUNT`,

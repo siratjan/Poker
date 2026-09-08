@@ -681,3 +681,245 @@ describe('greedy transfers are the specified ones, but not always the fewest', (
     expect(sum(result.transfers.map((entry) => entry.amount))).toBe(70000);
   });
 });
+
+/* ------------------------------------------------------------------------- *
+ * Runde 2 (Nachprüfung zu qa/reports/WP3-gaby.md, Findings F3 und F6).
+ * Alle Erwartungswerte sind wieder von Hand aus docs/SETTLEMENT.md hergeleitet
+ * und im Kommentar über dem Fall ausgeschrieben.
+ * ------------------------------------------------------------------------- */
+
+describe('(f) uncoveredDebts explains a negative discrepancy (F3)', () => {
+  // TV9b von Hand, unabhängig vom Testvektor in settlement.test.ts:
+  // A 100,00 Liste / Stack 0 · B 100,00 Liste / Stack 100,00.
+  // cashBoxStart = 0 (niemand zahlt bar) -> box = 0.
+  // totalBuyIn = 200,00 · totalStack = 100,00 -> discrepancy = -100,00.
+  // claim: A 0 · B 100,00. isCashPlayer: beide false.
+  // Stufe 1: want1 = 0 für beide (kein Bar-Zahler). Stufe 2: 0.
+  // Stufe 3: want3 = A 0 · B 100,00, Summe 100,00 > box 0 -> rationiert auf 0.
+  // unallocatedCash = 0. cashFromBox = 0 / 0.
+  // residual = claim - cashFromBox - creditIn:
+  //   A 0 - 0 - 100,00 = -100,00 · B 100,00 - 0 - 100,00 = 0.
+  // Gläubiger: keine -> keine Transfers, uncoveredClaims 0, uncoveredDebts 100,00.
+  // Gleichung: unallocatedCash 0 + uncoveredDebts 100,00 == -discrepancy 100,00.
+  it('reports TV9b exactly as the document does (recomputed by hand)', () => {
+    const rows = participants([
+      { playerId: 'A', creditIn: 10000, stack: 0 },
+      { playerId: 'B', creditIn: 10000, stack: 10000 },
+    ]);
+    const result = computeSettlement(rows);
+
+    expect(result.discrepancy).toBe(-10000);
+    expect(tiers(result)).toEqual([
+      [0, 0, 0, 0, -10000],
+      [0, 0, 0, 0, 0],
+    ]);
+    expect(result.transfers).toEqual([]);
+    expect(result.unallocatedCash).toBe(0);
+    expect(result.uncoveredClaims).toBe(0);
+    expect(result.uncoveredDebts).toBe(10000);
+    expect(result.unallocatedCash + result.uncoveredDebts).toBe(-result.discrepancy);
+    assertBooksBalance(rows, result);
+  });
+
+  // Der Fall aus Finding F3, jetzt mit dem neuen Feld nachgeprüft:
+  // A 100,00 bar / Stack 50,00 · B 100,00 Liste / Stack 50,00 -> discrepancy -100,00,
+  // unallocatedCash 0, aber B trägt eine Schuld von 100,00 ohne Gläubiger. Genau
+  // diese 100,00 waren vor Runde 2 im Ergebnis überhaupt nicht sichtbar.
+  it('makes the previously invisible debt of finding F3 visible', () => {
+    const rows = participants([
+      { playerId: 'A', cashIn: 10000, stack: 5000 },
+      { playerId: 'B', creditIn: 10000, stack: 5000 },
+    ]);
+    const result = computeSettlement(rows);
+
+    expect(result.discrepancy).toBe(-10000);
+    expect(result.unallocatedCash).toBe(0);
+    expect(result.uncoveredDebts).toBe(10000);
+    expect(result.unallocatedCash + result.uncoveredDebts).toBe(-result.discrepancy);
+  });
+
+  // Beide Größen gleichzeitig > 0 - der für WP6 entscheidende Fall:
+  // A 100,00 bar / Stack 50,00 · B 100,00 Liste / Stack 20,00.
+  // box = 100,00. totalBuyIn = 200,00 · totalStack = 70,00 -> discrepancy = -130,00.
+  // claim: A 50,00 · B 20,00.
+  // Stufe 1: want1 A = min(100,00; 50,00) = 50,00 <= box -> voll, box = 50,00.
+  // Stufe 2: want2 A = 50,00 - 50,00 = 0 -> box bleibt 50,00.
+  // Stufe 3: want3 B = 20,00 <= box 50,00 -> voll, box = 30,00 = unallocatedCash.
+  // residual: A 50,00 - 50,00 - 0 = 0 · B 20,00 - 20,00 - 100,00 = -100,00.
+  // Keine Gläubiger -> uncoveredDebts = 100,00, uncoveredClaims = 0.
+  // Gleichung: 30,00 + 100,00 = 130,00 = -discrepancy. Weder unallocatedCash noch
+  // uncoveredDebts erklärt die Differenz allein - WP6 muss beide Zahlen zeigen.
+  it('splits a negative discrepancy over unallocatedCash and uncoveredDebts', () => {
+    const rows = participants([
+      { playerId: 'A', cashIn: 10000, stack: 5000 },
+      { playerId: 'B', creditIn: 10000, stack: 2000 },
+    ]);
+    const result = computeSettlement(rows);
+
+    expect(result.discrepancy).toBe(-13000);
+    expect(tiers(result)).toEqual([
+      [5000, 0, 0, 5000, 0],
+      [0, 0, 2000, 2000, -10000],
+    ]);
+    expect(result.unallocatedCash).toBe(3000);
+    expect(result.uncoveredDebts).toBe(10000);
+    expect(result.uncoveredClaims).toBe(0);
+    expect(result.transfers).toEqual([]);
+    expect(result.unallocatedCash + result.uncoveredDebts).toBe(-result.discrepancy);
+    // Keine der beiden Zahlen erklärt die Differenz für sich allein.
+    expect(result.unallocatedCash).not.toBe(-result.discrepancy);
+    expect(result.uncoveredDebts).not.toBe(-result.discrepancy);
+    assertBooksBalance(rows, result);
+  });
+
+  // Gegenrichtung: zu viel gezählte Chips -> uncoveredDebts muss 0 bleiben.
+  // A 100,00 bar / Stack 150,00 · B 100,00 Liste / Stack 70,00.
+  // box = 100,00. totalBuyIn = 200,00 · totalStack = 220,00 -> discrepancy = +20,00.
+  // Stufe 1: want1 A = min(100,00; 150,00) = 100,00 <= box -> voll, box = 0.
+  // Stufe 2: want2 A = 150,00 - 100,00 = 50,00, box 0 -> 0. Stufe 3: B 0.
+  // residual: A 150,00 - 100,00 - 0 = +50,00 · B 70,00 - 0 - 100,00 = -30,00.
+  // Greedy: B -> A 30,00. Rest Gläubiger A 20,00 -> uncoveredClaims 20,00 = discrepancy,
+  // uncoveredDebts 0, unallocatedCash 0.
+  it('keeps uncoveredDebts at zero when chips were counted in excess', () => {
+    const rows = participants([
+      { playerId: 'A', cashIn: 10000, stack: 15000 },
+      { playerId: 'B', creditIn: 10000, stack: 7000 },
+    ]);
+    const result = computeSettlement(rows);
+
+    expect(result.discrepancy).toBe(2000);
+    expect(tiers(result)).toEqual([
+      [10000, 0, 0, 10000, 5000],
+      [0, 0, 0, 0, -3000],
+    ]);
+    expect(result.transfers).toEqual([{ fromPlayerId: 'B', toPlayerId: 'A', amount: 3000 }]);
+    expect(result.uncoveredClaims).toBe(2000);
+    expect(result.uncoveredDebts).toBe(0);
+    expect(result.unallocatedCash).toBe(0);
+    assertBooksBalance(rows, result);
+  });
+
+  /**
+   * Unabhängige Fassung der beiden Gleichungen aus docs/SETTLEMENT.md, Schritt 5:
+   * statt der Fallunterscheidung nach dem Vorzeichen prüfe ich die eine Bilanz
+   *   unallocatedCash + uncoveredDebts - uncoveredClaims == -discrepancy
+   * (hergeleitet aus Summe residual == discrepancy + unallocatedCash) und dazu,
+   * dass immer höchstens eine der beiden offenen Summen > 0 ist. Beides zusammen
+   * ist zu den beiden Dokument-Gleichungen äquivalent.
+   */
+  it('satisfies the step 5 balance for arbitrary sessions', () => {
+    const amount = fc.integer({ min: 0, max: 1000 }).map((n) => n * 50);
+    const signs = new Set<number>();
+
+    fc.assert(
+      fc.property(
+        fc.array(fc.record({ cashIn: amount, creditIn: amount, stack: amount }), {
+          minLength: 1,
+          maxLength: 6,
+        }),
+        (rows) => {
+          const input: SettlementParticipant[] = rows.map((row, index) => ({
+            playerId: `p${index}`,
+            name: `Spieler ${index}`,
+            position: index,
+            cashIn: row.cashIn,
+            creditIn: row.creditIn,
+            stack: row.stack,
+            payout: 0,
+          }));
+          const result = computeSettlement(input);
+
+          signs.add(Math.sign(result.discrepancy));
+          // Als Summe formuliert statt mit -discrepancy: bei discrepancy 0 wäre
+          // die Negation -0, und toBe vergleicht mit Object.is.
+          expect(
+            result.unallocatedCash +
+              result.uncoveredDebts -
+              result.uncoveredClaims +
+              result.discrepancy,
+          ).toBe(0);
+          expect(Math.min(result.uncoveredClaims, result.uncoveredDebts)).toBe(0);
+          expect(result.uncoveredDebts).toBeGreaterThanOrEqual(0);
+          expect(Number.isInteger(result.uncoveredDebts)).toBe(true);
+        },
+      ),
+      { numRuns: 2000 },
+    );
+
+    // Der Generator ist nur aussagekräftig, wenn er beide Vorzeichen trifft.
+    // discrepancy == 0 kommt bei frei gewürfelten Beträgen praktisch nie vor und
+    // ist durch die ausgeglichenen Fälle oben (a)-(e) reichlich abgedeckt.
+    expect(signs.has(-1)).toBe(true);
+    expect(signs.has(1)).toBe(true);
+  });
+});
+
+describe('(g) position is mandatory: INVALID_POSITION (F6)', () => {
+  type Loose = Omit<SettlementParticipant, 'position'> & { position?: number };
+
+  function loose(rows: readonly Loose[]): SettlementParticipant[] {
+    return rows as SettlementParticipant[];
+  }
+
+  const base = { cashIn: 10000, creditIn: 0, stack: 10000, payout: 0 };
+
+  // Genau das Szenario aus Finding F6: ein Teilnehmer mit echter position, einer
+  // ohne. Vorher wurden Position 5 und Array-Index 1 stillschweigend gemischt und
+  // b landete vor a. Jetzt muss der Aufruf abgelehnt werden, statt still falsch
+  // zu sortieren.
+  it('rejects a partially filled position instead of mixing it with the index', () => {
+    expect(() =>
+      computeSettlement(
+        loose([
+          { playerId: 'a', name: 'Ali', position: 5, ...base },
+          { playerId: 'b', name: 'Ben', ...base },
+        ]),
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_POSITION', playerId: 'b' }));
+  });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['a fraction', 1.5],
+  ])('rejects %s as position', (_label, position) => {
+    expect(() =>
+      computeSettlement([{ playerId: 'a', name: 'Ali', position, ...base }]),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_POSITION', playerId: 'a' }));
+  });
+
+  it('names the second player when two positions collide', () => {
+    expect(() =>
+      computeSettlement([
+        { playerId: 'a', name: 'Ali', position: 3, ...base },
+        { playerId: 'b', name: 'Ben', position: 9, ...base },
+        { playerId: 'c', name: 'Can', position: 3, ...base },
+      ]),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_POSITION', playerId: 'c' }));
+  });
+
+  // Nach dem Entfernen eines Spielers können in session_players Lücken stehen.
+  // Sortiert wird nach dem Wert der position, nicht nach der Array-Reihenfolge.
+  it('sorts by the value of position even when the numbers have gaps', () => {
+    const result = computeSettlement([
+      { playerId: 'a', name: 'Ali', position: 10, ...base },
+      { playerId: 'b', name: 'Ben', position: 2, ...base },
+      { playerId: 'c', name: 'Can', position: 7, ...base },
+    ]);
+
+    expect(result.lines.map((line) => line.playerId)).toEqual(['b', 'c', 'a']);
+  });
+
+  // Bewusste Entscheidung von Siri (Handoff Runde 2): docs/SETTLEMENT.md TV12
+  // nennt nur fehlende, nicht-ganzzahlige und doppelte position, daher bleibt
+  // eine negative position erlaubt. Hier festgenagelt, damit eine spätere
+  // Änderung eine bewusste ist.
+  it('accepts a negative position, as TV12 does not forbid it', () => {
+    const result = computeSettlement([
+      { playerId: 'a', name: 'Ali', position: 0, ...base },
+      { playerId: 'b', name: 'Ben', position: -4, ...base },
+    ]);
+
+    expect(result.lines.map((line) => line.playerId)).toEqual(['b', 'a']);
+  });
+});

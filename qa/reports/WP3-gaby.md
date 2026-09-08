@@ -1,9 +1,16 @@
 # WP3 – Prüfbericht Gaby
 
-**Urteil: FREIGEGEBEN** (mit Hinweisen – 0 Blocker, 0 Major, 6 Minor)
+**Urteil: FREIGEGEBEN** – nach Runde 2 bestätigt.
 
-Geprüft im Worktree `C:\Users\sirat\Poker_App_wp3`, Branch `wp3`, Commit `7180bc6`
+- **Runde 1** (Commit `7180bc6`): 0 Blocker, 0 Major, 6 Minor (F1–F6).
+- **Runde 2** (Commit `9087f54`): **alle sechs Findings erledigt (6 × ✔)**. Ein neuer Minor
+  (**F7**) ist bei der Nacharbeit entstanden: `src/lib/settlement/README.md` behauptet noch
+  einen Sortier-Fallback nach `name`/`playerId`, den es weder im Code noch in
+  `docs/SETTLEMENT.md` gibt. Eine Zeile Text, kein falscher Cent → bleibt FREIGEGEBEN.
+
+Geprüft in Runde 1 im Worktree `C:\Users\sirat\Poker_App_wp3`, Branch `wp3`, Commit `7180bc6`
 (`WP3: settlement algorithm with tests`), am 08.09.2026.
+Runde 2 in `C:\Users\sirat\Poker_App`, Branch `main`, Commit `9087f54`, am 08.09.2026.
 
 Kernaussage: Ich habe **TV1–TV12 vollständig von Hand nachgerechnet** und mit den
 Erwartungswerten **im Testcode** (`src/lib/settlement/settlement.test.ts`, Array `vectors`)
@@ -377,6 +384,247 @@ blockierend:
    eine Konsequenz für WP6: Bei negativer Differenz erklärt `unallocatedCash` nicht immer den
    ganzen Fehlbetrag – die Anzeige sollte das nicht behaupten.
 
-## Runde 2
+## Runde 2 (Nachprüfung, 08.09.2026)
 
-Entfällt (keine Nacharbeit).
+Grundlage: Commit `9087f54` (`WP3: uncoveredDebts, required position, review cleanups (round 2)`)
+auf `main`, Siris Handoff `qa/handoffs/WP3-siri.md` Abschnitt „Runde 2", und die
+Planer-Entscheidungen (F1 durch Merge erledigt; F3 → `uncoveredDebts` + TV9b +
+Property-Gleichungen; F6 → `position` Pflicht mit `INVALID_POSITION`; Tie-Breaks nach
+Name/`playerId` entfernt, `docs/SETTLEMENT.md` Abschnitt „Eingabe" vom Planer angepasst).
+
+Der Commit fasst neun Dateien an, davon **keine** außerhalb von WP3:
+`src/lib/settlement/{README.md,errors.ts,index.ts,transfers.ts,types.ts}`, die drei Testdateien
+und `vitest.config.mts`. `docs/SETTLEMENT.md` hat Siri korrekt **nicht** angefasst.
+
+### Durchgeführt
+
+| Befehl | Ergebnis |
+|---|---|
+| `git show --stat 9087f54` + vollständiger Diff gelesen | 9 Dateien, +349/−58, nichts außerhalb von WP3 |
+| `npm run check` (Beginn der Prüfung, 17:36) | **grün**, 9 Dateien / 205 Tests, 867 ms |
+| `npx vitest run src/ tests/gaby/settlement.gaby.test.ts` (WP3-Umfang, mit meinen neuen Tests) | **grün**, 6 Dateien / **121 Tests**; zweiter Lauf identisch |
+| `npm run typecheck` / `npm run lint` (ganzes Repo, inkl. meiner Tests) | **grün** |
+| `npm run test:coverage` | **grün, ohne Parse-Fehler und ohne Stacktrace** |
+| Coverage `src/lib/settlement` (aus `coverage-summary.json`) | **100 % Stmts / 100 % Branches / 100 % Funcs / 100 % Lines** |
+| `npx vitest run tests/gaby/settlement.gaby.test.ts` | **grün**, 34 Tests (22 alte unverändert + 12 neue) |
+| `git diff 7486cfd HEAD -- tests/gaby/settlement.gaby.test.ts` | **leer** – meine 22 Tests aus Runde 1 sind unangetastet |
+
+`npm ci` und `npm run build` habe ich nach Vorgabe des Planers **nicht** ausgeführt.
+
+> **`npm run check` ist am Ende der Prüfung rot – aber nicht wegen WP3.** Um 17:36 war der
+> volle Lauf grün (205 Tests). Um 17:41 schlugen 3–5 Tests in
+> `tests/gaby/wp1-schema.gaby.test.ts` fehl (SQL-Prüfungen zu `search_path`, Trigger-Drops und
+> der Fehlercode-Liste). Diese Datei gehört zur **parallel laufenden WP1-Nacharbeit** eines
+> anderen Siri an `supabase/**`; sie ist nicht committet und wandert gerade unter meinen
+> Händen. Ich habe sie auftragsgemäß weder angefasst noch bewertet. Im WP3-Umfang
+> (`src/**` + `tests/gaby/settlement.gaby.test.ts`) sind **alle 121 Tests grün**, ebenso
+> `typecheck` und `lint` über das ganze Repo. Der Planer sollte `npm run check` nach dem
+> Abschluss von WP1 noch einmal als Ganzes sehen.
+
+### Findings aus Runde 1
+
+| Finding | Status | Nachweis |
+|---|---|---|
+| **F1** – `docs/SETTLEMENT.md` im Worktree veraltet | **✔** | Durch den Merge `271c4e1` erledigt. Es gibt nur noch eine Datei, und sie trägt die geschärfte Invariante 5 (`payout_j ≤ cashIn_j` für alle j). |
+| **F2** – überholte Kommentare zur alten Invariante 5 | **✔** | `settlement.property.test.ts:189–196` und `settlement.test.ts:456–467` beschreiben jetzt die geltende Fassung; die Formulierungen „one cent too weak" und „Counterexample to the literal wording" sind weg. Die Assertions sind unverändert – genau richtig, sie waren schon korrekt. |
+| **F3** – „bereits als `unallocatedCash` sichtbar" stimmt nicht immer | **✔** | Neues Pflichtfeld `SettlementResult.uncoveredDebts`, TV9b als Vektor ergänzt, `uncoveredDebts` wird in **allen** Vektoren geprüft, und die beiden Gleichungen aus Schritt 5 laufen in `checkGeneralInvariants` in **jedem** Property-Test mit. Details unten. |
+| **F4** – „minimale Anzahl" Überweisungen | **✔** | `transfers.ts:27–34` und `README.md` sagen jetzt „deliberately *not* … the theoretical minimum, which would be NP-hard". `grep -rni "minimal" src/lib/settlement/ docs/SETTLEMENT.md` findet nichts mehr. Der Algorithmus ist unverändert – richtig so, mein Test „needs four transfers where three would settle the same residuals" ist weiter grün. |
+| **F5** – Coverage-Lauf parst `README.md` | **✔** | `vitest.config.mts`: `include: ['src/lib/**/*.ts']`, `exclude: ['src/lib/**/*.test.ts']`. `npm run test:coverage` liefert keinen Treffer mehr auf `failed to parse`/`stack`/`README`. |
+| **F6** – `position` optional mit Fallback auf den Array-Index | **✔** | `position: number` ist Pflicht; `assertPosition` (`index.ts:170–192`) wirft `INVALID_POSITION` bei fehlender, nicht-ganzzahliger und doppelter Position. Der Fallback `position ?? index` existiert nicht mehr. |
+
+### TV9b von Hand nachgerechnet
+
+Auftragsgemäß unabhängig vom Testcode hergeleitet und erst danach verglichen.
+
+```
+A Liste 100,00 / Stack 0 / payout 0 · B Liste 100,00 / Stack 100,00 / payout 0
+cashBoxStart = Σ cashIn = 0 ; Σ payout = 0 ; box = 0
+Vorbedingung Σ payout ≤ Σ cashIn : 0 ≤ 0 ✔
+totalBuyIn = 200,00 ; totalStack = 100,00 ; discrepancy = 100,00 − 200,00 = −100,00
+claim   = A 0 − 0 = 0 · B 100,00 − 0 = 100,00
+isCash  = A nein · B nein  (cashIn = 0)
+Stufe 1 want1 = 0 für beide (kein Bar-Zahler)          → tier1 = 0/0 ; box = 0
+Stufe 2 want2 = 0 für beide (nur Bar-Zahler)           → tier2 = 0/0 ; box = 0
+Stufe 3 want3 = A 0 · B 100,00 ; Σ = 100,00 > box 0 → rationieren mit box = 0:
+        share_B = 10000 · 0 / 10000 = 0                → tier3 = 0/0 ; box = 0
+unallocatedCash = 0
+cashFromBox = A 0 · B 0
+residual = claim − cashFromBox − creditIn
+        A   0    −  0 − 100,00 = −100,00
+        B 100,00 −  0 − 100,00 =       0        (Σ = −100,00 = discrepancy ✔)
+Transfers: Gläubiger [] , Schuldner [A 100,00] → Schleife läuft nicht
+        uncoveredClaims = 0 ; uncoveredDebts = 100,00
+Gleichung Schritt 5: unallocatedCash 0 + uncoveredDebts 100,00 = 100,00 = −discrepancy ✔
+```
+
+Testcode `settlement.test.ts:240–254`: `discrepancy −10000`, `unallocatedCash 0`,
+`uncoveredClaims 0`, `uncoveredDebts 10000`, `A 0/0/0/0/−10000`, `B 0/0/0/0/0`, `transfers []`.
+**Identisch** – auch mit dem Dokument (`docs/SETTLEMENT.md`, TV9b). Ich habe TV9b zusätzlich als
+eigenen Test in `tests/gaby/settlement.gaby.test.ts` hinterlegt
+(„reports TV9b exactly as the document does"), damit die Rechnung ohne Siris Datei nachprüfbar
+bleibt.
+
+### Die beiden Gleichungen aus Schritt 5 – Beweis und Property-Test
+
+`docs/SETTLEMENT.md`, Schritt 5, Zeilen 150–156 fordern:
+`discrepancy < 0` → `unallocatedCash + uncoveredDebts == −discrepancy`;
+`discrepancy > 0` → `uncoveredClaims == discrepancy`.
+
+**Ich habe sie erst bewiesen, dann den Test dagegen gehalten.** Mit
+`Σ cashFromBox = Σ cashIn − Σ payout − box` gilt
+
+```
+Σ residual = Σ(claim − cashFromBox − creditIn)
+           = (Σ stack − Σ payout) − (Σ cashIn − Σ payout − box) − Σ creditIn
+           = Σ stack − Σ cashIn − Σ creditIn + box
+           = discrepancy + unallocatedCash
+```
+
+Der Greedy schöpft immer die kleinere Seite aus, also
+`uncoveredClaims − uncoveredDebts = Σ residual = discrepancy + unallocatedCash`, und höchstens
+eine der beiden Summen ist > 0. Dazu die Schlüsselbeobachtung: **bleibt nach Stufe 3 Geld in der
+Kasse (`unallocatedCash > 0`), wurde jeder Wunsch voll bedient**, also `residual_i = −creditIn_i ≤ 0`
+und damit `uncoveredClaims = 0`. Daraus folgen beide Dokumentgleichungen zwingend, und für
+`discrepancy > 0` zusätzlich `unallocatedCash = 0` (sonst wäre `Σ residual ≤ 0 < discrepancy`).
+
+Siris `checkGeneralInvariants` (`settlement.property.test.ts:192–205`) prüft genau diese drei
+Fälle – **korrekt und vollständig**, einschließlich `uncoveredClaims == 0` bzw.
+`uncoveredDebts == 0` auf der jeweils anderen Seite und aller drei Werte = 0 bei
+`discrepancy == 0`. Da der Block in `checkGeneralInvariants` steht, läuft er in **allen vier**
+Properties mit, nicht nur im neuen. `result.uncoveredDebts` ist außerdem in die
+Ganzzahl-/Vorzeichenprüfung von Invariante 1 aufgenommen.
+
+Die beiden neuen Properties sind sauber gebaut:
+`buildWithDiscrepancy` erzwingt über `fc.oneof` je einen Zweig für echt negatives und echt
+positives `delta`, und der Test prüft am Ende selbst nach, dass er **beide Vorzeichen gesehen
+hat** (`seenSigns`) – genau die Selbstkontrolle, die einem Property-Test sonst fehlt. Die
+Assertions lesen `result.discrepancy`, nie `delta`; das Clamping bei `Math.max(0, …)` kann den
+Test also nicht stillschweigend entwerten. Die TV9b-Verallgemeinerung
+(reine Listen-Runde, alle Stacks 0 → `uncoveredDebts == Σ creditIn`) habe ich von Hand
+nachvollzogen: box ist 0, Stufe 3 rationiert auf 0, jeder residual ist `−creditIn_i`, es gibt
+keinen Gläubiger. Stimmt.
+
+**Eigene Gegenprobe:** Ich prüfe die Bilanz in einer anderen Formulierung als Siri – nicht per
+Fallunterscheidung, sondern als eine Gleichung
+`unallocatedCash + uncoveredDebts − uncoveredClaims + discrepancy == 0` plus
+`min(uncoveredClaims, uncoveredDebts) == 0`. Das ist zu den beiden Dokumentgleichungen
+äquivalent, benutzt aber einen unabhängigen Generator (cashIn/creditIn/stack frei gewürfelt,
+1–6 Spieler). **2 000 Läufe, kein Gegenbeispiel**; der Test weist selbst nach, dass er beide
+Vorzeichen der Differenz getroffen hat.
+
+### F6 nachgeprüft: `position` und der entfernte Tie-Break
+
+Der Kern von F6 war das **stille** Mischen echter Positionen mit Array-Indizes. Genau dieser
+Aufruf wird jetzt abgelehnt (mein Test „rejects a partially filled position instead of mixing it
+with the index"): `{playerId:'a', position:5}, {playerId:'b'}` wirft `INVALID_POSITION` mit
+`playerId: 'b'`, statt `b` vor `a` zu sortieren. Damit ist der Robustheitshinweis für WP5/WP6
+erledigt – ein handgebautes Vorschau-Array **muss** die Reihenfolge jetzt aussprechen.
+
+Das Entfernen des sekundären/tertiären Tie-Breaks habe ich gegengeprüft und halte es für
+**richtig**: `position` wird als eindeutige Ganzzahl validiert, bevor sortiert wird, also ist
+`a.position - b.position` eine totale Ordnung und der Vergleich nach `name`/`playerId` war
+nachweislich unerreichbar. Das Ergebnis ändert sich in **keinem** erreichbaren Fall — meine
+Permutationstests aus Runde 1 (alle 120 Reihenfolgen + 500 fast-check-Permutationen) sind
+unverändert grün. Der Planer hat `docs/SETTLEMENT.md` Abschnitt „Eingabe" entsprechend auf
+„Weitere Sortierschlüssel gibt es nicht" gesetzt; Code und Dokument decken sich.
+
+Angriffe, die ich zusätzlich gefahren habe (alle als Test hinterlegt): `NaN` und `Infinity` als
+`position` (beide `INVALID_POSITION` – `Number.isInteger` fängt sie), Kollision an dritter
+Stelle (der Fehler nennt den **zweiten** Träger `c`, nicht `a`), Positionen mit Lücken
+(`10, 2, 7` → sortiert `b, c, a`; wichtig, weil `session_players` nach dem Entfernen eines
+Spielers Lücken hat) und eine negative `position`, die bewusst **erlaubt** bleibt.
+
+### Coverage: eine Lesefalle, kein Fehler
+
+`npm run test:coverage` läuft sauber (F5 ✔), aber die **Textausgabe zeigt die Zeile
+`lib/settlement` gar nicht mehr**. Das ist kein Rückschritt, sondern eine Folge des Erfolgs:
+der Text-Reporter blendet Einträge aus, die in **allen vier** Metriken auf 100 % stehen. In
+Runde 1 standen die Branches auf 92,85 %, deshalb war die Zeile sichtbar. Ich habe das
+verifiziert – mit der **alten** Konfiguration (`include: ['src/lib/**']`) fehlt die Zeile
+genauso, es liegt also nicht an Siris Änderung – und die Zahlen stattdessen aus
+`coverage-summary.json` gelesen:
+
+```
+distribute.ts  100 / 100 / 100 / 100      index.ts      100 / 100 / 100 / 100
+errors.ts      100 / 100 / 100 / 100      transfers.ts  100 / 100 / 100 / 100
+format.ts      100 / 100 / 100 / 100      types.ts      100 / 100 / 100 / 100
+                                          (Stmts / Branches / Funcs / Lines)
+```
+
+Die DoD (≥ 95 % Zeilen) ist mit **100 %** erfüllt, und die 92,85 % Branches aus Runde 1 sind auf
+**100 %** gestiegen. **Hinweis für den Planer:** Wer die DoD künftig am Terminal abliest, findet
+die Zeile nicht mehr und könnte das für einen Rückschritt halten – die belastbare Quelle ist
+`npx vitest run --coverage --coverage.reporter=json-summary`.
+
+### Neues Finding
+
+#### F7 – [Minor] `README.md` verspricht einen Sortier-Fallback, den es nicht mehr gibt
+
+- **Wo**: `src/lib/settlement/README.md:22`
+- **Beobachtet**: „`position` … **Pflicht** … einen Rückfall auf den Array-Index gibt es nicht.
+  **Danach wird sekundär nach `name`, tertiär nach `playerId` sortiert.**" Der zweite Satz ist
+  in Runde 2 falsch geworden: `validateAndSort` sortiert nur noch nach `a.position - b.position`,
+  `docs/SETTLEMENT.md` („Eingabe") sagt ausdrücklich „Weitere Sortierschlüssel gibt es nicht",
+  und Siris eigener Kommentar in `types.ts:13–15` erklärt, dass `name` von der Berechnung gar
+  nicht mehr gelesen wird (`grep "\.name" src/lib/settlement/*.ts` findet nur
+  `SettlementError.name`). Die drei Aussagen widersprechen sich.
+- **Erwartet**: Den Halbsatz streichen (der Absatz stimmt sonst). Das README ist das erste, was
+  ein WP5/WP6-Entwickler liest; es darf der Spezifikation nicht widersprechen. Nebenbei: der
+  Kommentar in `types.ts:13–15` verweist auf „the secondary sort key of `docs/SETTLEMENT.md`" –
+  den gibt es dort seit der Planer-Anpassung nicht mehr.
+- **Reproduktion**: `sed -n '20,23p' src/lib/settlement/README.md` gegen
+  `docs/SETTLEMENT.md`, Abschnitt „Eingabe", letzter Absatz.
+- **Wirkung auf das Urteil**: keine. Reine Dokumentation, kein falscher Cent.
+
+### Meine Tests
+
+`tests/gaby/settlement.gaby.test.ts` ist von **22 auf 34 Tests** gewachsen. Die 22 aus Runde 1
+sind **byte-identisch** unverändert (`git diff 7486cfd HEAD` auf die Datei ist leer) und alle
+grün – Siris Pflicht-`position` bricht sie nicht, weil ich `position` von Anfang an überall
+gesetzt hatte. Neu sind zwölf Tests in zwei Blöcken:
+
+- **(f) `uncoveredDebts`**: TV9b eigenständig nachgerechnet; mein F3-Gegenbeispiel, jetzt mit
+  sichtbarer Schuld; **der Fall, in dem `unallocatedCash` *und* `uncoveredDebts` gleichzeitig
+  > 0 sind** (A bar 100,00/Stack 50,00 · B Liste 100,00/Stack 20,00 → `discrepancy −130,00`,
+  `unallocatedCash 30,00`, `uncoveredDebts 100,00`) – der Test hält ausdrücklich fest, dass
+  **keine der beiden Zahlen die Differenz allein erklärt**; die Gegenrichtung
+  (`discrepancy > 0` → `uncoveredDebts == 0`); und die Bilanz-Property über 2 000 Läufe.
+- **(g) `INVALID_POSITION`**: die sechs oben beschriebenen Angriffe.
+
+> Hinweis zur Redlichkeit: Zwei meiner neuen Assertions sind im ersten Lauf fehlgeschlagen,
+> **beide Male lag der Fehler bei mir**. (1) `expect(x).toBe(-result.discrepancy)` vergleicht mit
+> `Object.is`, und bei `discrepancy === 0` ist `-0 !== 0`; ich habe die Gleichung als Summe
+> umgeschrieben, statt die Erwartung abzuschwächen. (2) Meine Vorzeichen-Selbstkontrolle
+> verlangte auch `discrepancy === 0`, was bei frei gewürfelten Beträgen praktisch nie eintritt;
+> ich prüfe jetzt beide **von null verschiedenen** Vorzeichen, der ausgeglichene Fall ist durch
+> die Blöcke (a)–(e) reichlich abgedeckt. **Der Code war in beiden Fällen richtig.**
+
+### Nicht verifiziert (Runde 2)
+
+- **`npm ci` und `npm run build`** – vom Planer ausdrücklich ausgenommen. `package.json` ist
+  unverändert, es kommen keine Abhängigkeiten dazu; Siri berichtet beides als grün.
+- **`npm run check` als Ganzes.** Zu Beginn meiner Prüfung grün (205 Tests); am Ende rot **allein**
+  wegen `tests/gaby/wp1-schema.gaby.test.ts` aus der parallelen WP1-Nacharbeit, die ich
+  auftragsgemäß nicht bewerte. `typecheck`, `lint` und der komplette WP3-Umfang sind grün. Der
+  Planer muss `npm run check` nach WP1 noch einmal als Ganzes sehen.
+- **WP1-Änderungen** (`supabase/**`, `scripts/**`, `src/lib/database.types.ts`,
+  `qa/handoffs/WP1-siri.md`, `qa/reports/WP1-gaby.md`, `tests/gaby/wp1-schema.gaby.test.ts`) und
+  die **unversionierten Änderungen an `docs/SETTLEMENT.md`** – nicht angefasst, nicht bewertet.
+- **Integration mit UI/DB** – unverändert Sache von WP5/WP6. WP3 hat keine UI, es gibt für den
+  Planer **nichts** manuell im Browser zu prüfen.
+
+### Empfehlung an den Planer
+
+**FREIGEGEBEN.** Die Nacharbeit ist sauber: Siri hat alle sechs Punkte erledigt, ohne am
+Algorithmus zu drehen, und der Umbau auf die Pflicht-`position` ist eine echte Verbesserung
+statt einer Beruhigungspille. Offen bleiben drei kleine Dinge, keines blockierend:
+
+1. **F7** an Siri geben – ein Halbsatz in `src/lib/settlement/README.md:22` (und der Verweis in
+   `types.ts:13–15`). Kann in WP6 mitlaufen.
+2. Siris **offene Frage 3** ist mit deiner Anpassung von „Eingabe" bereits beantwortet; ich habe
+   das Entfernen des Tie-Breaks gegengeprüft und bestätige es als verhaltensneutral.
+3. **Für WP6 vormerken** (Siris offene Frage 4, mein F3): Eine negative Differenz braucht in der
+   Anzeige **beide** Zahlen – „n € Bargeld ohne Empfänger" (`unallocatedCash`) **und** „n €
+   Schuld ohne Gläubiger" (`uncoveredDebts`). Mein Test „splits a negative discrepancy over
+   unallocatedCash and uncoveredDebts" liefert dafür einen konkreten Fall, in dem beide Zahlen
+   gleichzeitig ungleich null sind.

@@ -5,7 +5,7 @@
 | WP0 | Projekt-Setup | 49bc81f | FREIGEGEBEN (Runde 2) | abgenommen, Browser geprüft | 2026-09-08 |
 | WP1 | Datenbank | – | – | – | – |
 | WP2 | Auth + Rollen | – | – | – | – |
-| WP3 | Abrechnungs-Algorithmus | 7180bc6 (merge 271c4e1) | FREIGEGEBEN (6 Minor, Runde 2 läuft) | – | 2026-09-08 |
+| WP3 | Abrechnungs-Algorithmus | 9087f54 | FREIGEGEBEN (Runde 2) | abgenommen | 2026-09-08 |
 | WP4 | Spieler + Session-Liste | – | – | – | – |
 | WP5 | Session-Detail | – | – | – | – |
 | WP6 | Abschluss + Abrechnung | – | – | – | – |
