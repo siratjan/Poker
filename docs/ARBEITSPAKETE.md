@@ -153,7 +153,7 @@ WP3 kann direkt nach WP0 parallel zu WP1/WP2 laufen.
 
 1. `src/app/login/page.tsx`: Zentrierte Karte, Titel „Poker-Kasse“, ein Button „Mit Google anmelden“. Client-Komponente ruft `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${origin}/auth/callback?next=${next}` } })`. Fehlertext, falls der Provider nicht konfiguriert ist.
 2. `src/app/auth/callback/route.ts`: `exchangeCodeForSession(code)`, Redirect auf `next` (nur relative Pfade zulassen) oder `/`. Bei Fehler Redirect `/login?error=…`.
-3. `src/middleware.ts`: Session refreshen (WP0-Helfer); nicht eingeloggt und Pfad nicht `/login`, `/auth/*`, statische Assets → Redirect `/login?next=<pfad>`. Eingeloggt und `/login` → Redirect `/`.
+3. `src/proxy.ts` (Next 16 hat `middleware.ts` zugunsten von `proxy.ts` abgekündigt; die WP0-Datei `src/middleware.ts` wird hier umbenannt, Export `proxy` statt `middleware`, Helfer in `src/lib/supabase/middleware.ts` darf den Namen behalten): Session refreshen; nicht eingeloggt und Pfad nicht `/login`, `/auth/*`, statische Assets → Redirect `/login?next=<pfad>`. Eingeloggt und `/login` → Redirect `/`.
 4. `src/lib/auth/getCurrentUser.ts` (Server): liest `auth.getUser()` und `app_users`-Zeile; gibt `{ id, email, displayName, avatarUrl, role }` oder `null`. `React.cache()` verwenden.
 5. `src/lib/auth/roles.ts`: `type Role = 'admin' | 'editor' | 'viewer'`, `canEdit(role)`, `isAdmin(role)`, `ROLE_LABELS` (Deutsch: Admin, Bearbeiter, Betrachter).
 6. `src/lib/auth/requireRole.ts` für Server Actions: `requireEditor()`, `requireAdmin()` – wirft strukturierten Fehler `FORBIDDEN`, den `actionResult()` in `{ ok:false }` übersetzt. (Doppelte Absicherung zur RLS für bessere Fehlermeldungen.)
