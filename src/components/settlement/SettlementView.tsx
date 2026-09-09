@@ -3,11 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import { Card } from '@/components/ui/Card';
 import { formatCents, formatSignedCents } from '@/lib/money';
-import {
-  describeDiscrepancy,
-  sortedByResult,
-  sumCashFromBox,
-} from '@/lib/settlement/shareText';
+import { describeDiscrepancy, sortedByResult } from '@/lib/settlement/shareText';
 import type { FrozenSettlement } from '@/lib/settlement/types';
 
 /**
@@ -62,7 +58,13 @@ export function SettlementView({
                 </li>
               ))}
             </ul>
-            <SumRow label="Summe" value={formatCents(sumCashFromBox(settlement))} />
+            {/*
+              „Summe = Kasse“ (WP6, step 3): the sum line is the cash box after
+              the early payouts, not Σ cashFromBox. The two differ exactly by
+              `unallocatedCash`, which is spelled out on the line below — so the
+              reader can add the rows up and land on the box (Gaby WP6, F3).
+            */}
+            <SumRow label="Summe" value={formatCents(settlement.cashBoxAfterPayouts)} />
           </>
         )}
         {settlement.unallocatedCash > 0 ? (

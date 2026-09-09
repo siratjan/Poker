@@ -18,7 +18,7 @@ import { AppError } from '@/lib/actions/result';
 export const DB_ERROR_MESSAGES = {
   // --- app_users / roles -----------------------------------------------------
   LAST_ADMIN:
-    'Der letzte Admin kann sich nicht selbst herabstufen. Mach zuerst jemand anderen zum Admin.',
+    'Der letzte Admin kann nicht degradiert werden. Mach zuerst jemand anderen zum Admin.',
   FORBIDDEN: 'Dafür fehlen dir die Rechte.',
   ONLY_ROLE_EDITABLE: 'An diesem Nutzer lässt sich nur die Rolle ändern.',
 
