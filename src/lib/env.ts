@@ -90,3 +90,15 @@ export function publicEnv(): PublicEnv {
 export function resetPublicEnvCache(): void {
   cached = null;
 }
+
+/**
+ * True while `next dev` runs, false in every deployed environment.
+ *
+ * Lives here because this module is the only place that reads `process.env`
+ * (Gaby WP2 test „liest process.env nur in src/lib/env.ts"). Used by the OAuth
+ * callback to decide whether the `x-forwarded-*` headers come from a real proxy
+ * (WP10; see src/lib/auth/origin.ts).
+ */
+export function isDevelopment(): boolean {
+  return process.env.NODE_ENV === 'development';
+}

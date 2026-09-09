@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { HOME_PATH, LOGIN_PATH, safeNextPath } from '@/lib/auth/paths';
 import { loginErrorCodeFor, type LoginErrorCode } from '@/lib/auth/loginErrors';
+import { publicOrigin } from '@/lib/auth/origin';
+import { isDevelopment } from '@/lib/env';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -10,9 +12,18 @@ import { createClient } from '@/lib/supabase/server';
  *
  * Every failure ends on /login with a code that the login page turns into a
  * German sentence; no raw provider message is ever shown.
+ *
+ * The redirect target is built against the *public* origin (see
+ * src/lib/auth/origin.ts): behind Vercel `request.nextUrl.origin` is the
+ * internal address, which would drop the visitor on a wrong host after login
+ * (Gaby WP2-F2, fixed in WP10).
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const { searchParams, origin } = request.nextUrl;
+  const { searchParams } = request.nextUrl;
+  const origin = publicOrigin(request.headers, request.nextUrl.origin, {
+    // Locally there is no proxy in front, so an injected header is ignored.
+    trustForwardedHeaders: !isDevelopment(),
+  });
   const next = safeNextPath(searchParams.get('next'), HOME_PATH);
 
   // The provider itself reported a problem (user cancelled, provider off).
