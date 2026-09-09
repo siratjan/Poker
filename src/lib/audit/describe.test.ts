@@ -312,6 +312,21 @@ describe('describeAuditEntry – settings', () => {
       say({ tableName: 'settings', action: 'DELETE', oldData: { key: 'theme', value: 'dark' } }),
     ).toBe('hat die Einstellung „theme“ gelöscht');
   });
+
+  it('an unknown action gets the generic sentence, not a claim about amounts', () => {
+    // Gaby WP8-F3: „TRUNCATE“ must not read „hat die Schnellbeträge … gesetzt“.
+    expect(
+      say({
+        tableName: 'settings',
+        action: 'TRUNCATE',
+        newData: { key: 'quick_amounts_cents', value: [5000] },
+      }),
+    ).toBe('hat einen Eintrag in „Einstellungen“ verändert');
+
+    expect(
+      say({ tableName: 'settings', action: '', newData: { key: 'theme', value: 'dark' } }),
+    ).toBe('hat einen Eintrag in „Einstellungen“ verändert');
+  });
 });
 
 describe('describeAuditEntry – settlements', () => {

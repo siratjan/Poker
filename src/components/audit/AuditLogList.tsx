@@ -17,6 +17,7 @@ import {
 } from '@/lib/audit/describe';
 import {
   auditFiltersToQuery,
+  auditListKey,
   hasAuditFilters,
   NO_AUDIT_FILTERS,
   type AuditFilters,
@@ -46,11 +47,28 @@ export function AuditLogList({
   options: AuditFilterOptions;
 }) {
   const router = useRouter();
-  const [entries, setEntries] = useState(initialEntries);
-  const [names, setNames] = useState(initialNames);
-  const [cursor, setCursor] = useState(initialCursor);
+  const filterKey = auditListKey(filters);
+
+  // The pages loaded so far. The page component keys this list on the active
+  // filters, so a filter change remounts it; the `filterKey` inside the state
+  // is the safety net for that (Gaby WP8-F1) — without it the component would
+  // keep the entries and the cursor of the previous filter and „Mehr laden“
+  // would send an old cursor with new filters.
+  const [loaded, setLoaded] = useState({
+    filterKey,
+    entries: initialEntries,
+    names: initialNames,
+    cursor: initialCursor,
+  });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (loaded.filterKey !== filterKey) {
+    setLoaded({ filterKey, entries: initialEntries, names: initialNames, cursor: initialCursor });
+    setError(null);
+  }
+
+  const { entries, names, cursor } = loaded;
 
   function applyFilters(next: AuditFilters) {
     router.push(`/log${auditFiltersToQuery(next)}`);
@@ -69,12 +87,19 @@ export function AuditLogList({
       return;
     }
 
-    setEntries((current) => [...current, ...result.data.entries]);
-    setNames((current) => ({
-      players: { ...current.players, ...result.data.names.players },
-      sessions: { ...current.sessions, ...result.data.names.sessions },
-    }));
-    setCursor(result.data.nextCursor);
+    setLoaded((current) => {
+      // Filters changed while the page was in flight: drop the stale answer.
+      if (current.filterKey !== filterKey) return current;
+      return {
+        filterKey,
+        entries: [...current.entries, ...result.data.entries],
+        names: {
+          players: { ...current.names.players, ...result.data.names.players },
+          sessions: { ...current.names.sessions, ...result.data.names.sessions },
+        },
+        cursor: result.data.nextCursor,
+      };
+    });
   }
 
   return (
