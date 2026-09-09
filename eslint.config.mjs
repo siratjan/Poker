@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Report output of "npm run test:coverage" (gitignored, not our source).
     "coverage/**",
+    // Agent worktrees (Claude Code) carry their own node_modules/.next.
+    ".claude/worktrees/**",
   ]),
 ]);
 

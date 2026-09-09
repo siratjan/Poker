@@ -20,6 +20,9 @@
 # production
 /build
 
+# agent worktrees (Claude Code)
+/.claude/worktrees/
+
 # misc
 .DS_Store
 *.pem
