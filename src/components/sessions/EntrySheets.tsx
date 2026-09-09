@@ -1,7 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Button, buttonClasses } from '@/components/ui/Button';
 import { Sheet } from '@/components/ui/Sheet';
 import { AmountField } from '@/components/sessions/AmountField';
 import { formatCents } from '@/lib/money';
@@ -68,6 +69,13 @@ export function ParticipantActionsSheet({
             Teilnehmer entfernen
           </Button>
         )}
+        {/* WP7, step 4: from the participant card to the player's overall balance. */}
+        <Link
+          href={`/players/${participant.playerId}`}
+          className={buttonClasses({ variant: 'secondary', size: 'lg' })}
+        >
+          Spieler-Seite öffnen
+        </Link>
         {hasStack ? (
           <p className="px-1 pt-1 text-xs opacity-60">
             {participant.name} ist ausgestiegen. Für einen weiteren Buy-in muss der Stack im
@@ -258,12 +266,18 @@ export function PayoutSheet({
 /** Add a participant: search existing players or create a new one. */
 export function AddParticipantSheet({
   players,
+  loadFailed,
   onAddExisting,
   onAddNew,
   onClose,
 }: {
   /** All players that are not yet participants of this session. */
   players: readonly PlayerListItem[];
+  /**
+   * The player list could not be read. „Nothing there“ and „could not load“
+   * must not read the same (Gaby WP5, F6) — creating a new player still works.
+   */
+  loadFailed: boolean;
   onAddExisting: (playerId: string) => SubmitResult;
   onAddNew: (name: string) => SubmitResult;
   onClose: () => void;
@@ -305,9 +319,11 @@ export function AddParticipantSheet({
 
         {matches.length === 0 ? (
           <p className="px-1 py-2 text-sm opacity-70">
-            {players.length === 0
-              ? 'Alle Spieler sind schon dabei.'
-              : 'Kein Spieler gefunden.'}
+            {loadFailed
+              ? 'Die Spielerliste konnte nicht geladen werden. Bitte die Seite neu laden – einen neuen Spieler kannst du trotzdem anlegen.'
+              : players.length === 0
+                ? 'Alle Spieler sind schon dabei.'
+                : 'Kein Spieler gefunden.'}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">

@@ -1,6 +1,7 @@
 'use client';
 
 import { clsx } from 'clsx';
+import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { formatCents } from '@/lib/money';
 import type { DerivedParticipant } from '@/lib/session/derive';
@@ -67,8 +68,17 @@ export function ParticipantCard({
     </div>
   );
 
+  // Without the action sheet (viewer, or a closed session) the whole card is
+  // the link to the player's overall balance (WP7, step 4). With it, that link
+  // sits in the action sheet, so the tap on the card stays the buy-in.
   if (!interactive) {
-    return <Card className="flex min-h-[72px] items-center px-4 py-3">{body}</Card>;
+    return (
+      <Link href={`/players/${participant.playerId}`} className="block">
+        <Card className="flex min-h-[72px] items-center px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.04]">
+          {body}
+        </Card>
+      </Link>
+    );
   }
 
   return (

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import type { Enums } from '@/lib/database.types';
+import type { QueryResult } from '@/lib/queries/result';
 
 /**
  * Read queries for sessions (docs/ARBEITSPAKETE.md WP4, step 3). Server only —
@@ -24,7 +25,7 @@ export type SessionListItem = {
  * participant count and buy-in total in the database — no N+1 follow-up per
  * session.
  */
-export async function listSessions(): Promise<SessionListItem[]> {
+export async function listSessions(): Promise<QueryResult<SessionListItem[]>> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('session_overview')
@@ -34,17 +35,22 @@ export async function listSessions(): Promise<SessionListItem[]> {
 
   if (error !== null) {
     console.error('[queries] listSessions:', error.message);
-    return [];
+    // Not an empty list: „no session yet“ and „could not load“ must not look
+    // the same on the start page (Gaby WP5, F6).
+    return { ok: false, reason: 'error' };
   }
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    playedOn: row.played_on,
-    name: row.name,
-    status: row.status,
-    participantCount: row.participant_count,
-    totalBuyInCents: row.total_buy_in_cents,
-  }));
+  return {
+    ok: true,
+    data: (data ?? []).map((row) => ({
+      id: row.id,
+      playedOn: row.played_on,
+      name: row.name,
+      status: row.status,
+      participantCount: row.participant_count,
+      totalBuyInCents: row.total_buy_in_cents,
+    })),
+  };
 }
 
 // The header-only reader of WP4 was replaced in WP5 by

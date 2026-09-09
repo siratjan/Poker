@@ -19,8 +19,23 @@ export default async function SessionsPage() {
   const user = await getCurrentUser();
   if (user === null) redirect(loginPathFor('/'));
 
-  const sessions = await listSessions();
+  const result = await listSessions();
   const mayEdit = canEdit(user.role);
+
+  // A failed query gets its own hint instead of looking like „no session yet“
+  // (Gaby WP5, F6).
+  if (!result.ok) {
+    return (
+      <section className="flex flex-col gap-4">
+        <h1 className="text-lg font-semibold">Sessions</h1>
+        <p className="rounded-2xl border border-dashed border-red-500/40 px-4 py-6 text-sm">
+          Die Sessions konnten gerade nicht geladen werden. Bitte die Seite neu laden.
+        </p>
+      </section>
+    );
+  }
+
+  const sessions = result.data;
 
   return (
     <section className="flex flex-col gap-4">

@@ -84,12 +84,15 @@ type SheetState =
 export function SessionDetailClient({
   detail,
   allPlayers,
+  playersLoadFailed,
   canEdit,
   isAdmin,
 }: {
   detail: SessionDetail;
   /** Every player, for the „Teilnehmer hinzufügen“ sheet. */
   allPlayers: PlayerListItem[];
+  /** The player list could not be read — the sheet says so (Gaby WP5, F6). */
+  playersLoadFailed: boolean;
   canEdit: boolean;
   /** Only an admin may close with a difference or reopen (SPEC §3). */
   isAdmin: boolean;
@@ -433,6 +436,7 @@ export function SessionDetailClient({
       {sheet.kind === 'addParticipant' ? (
         <AddParticipantSheet
           players={addablePlayers}
+          loadFailed={playersLoadFailed}
           onAddExisting={(playerId) =>
             run(() => addParticipant({ sessionId: session.id, playerId }), 'Teilnehmer hinzugefügt')
           }

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import type { Enums, Json } from '@/lib/database.types';
+import type { QueryResult } from '@/lib/queries/result';
 import type { SessionEntry, SessionParticipant } from '@/lib/session/derive';
 import { fromStoredRows } from '@/lib/settlement/toPersist';
 import type { FrozenSettlement } from '@/lib/settlement/types';
@@ -18,9 +19,9 @@ import type { FrozenSettlement } from '@/lib/settlement/types';
  * the same on screen.
  */
 
-export type QueryFailure = 'not_found' | 'error';
-
-export type QueryResult<T> = { ok: true; data: T } | { ok: false; reason: QueryFailure };
+// The result type moved to `./result` in WP7, where the player queries started
+// using it too. Re-exported so existing imports keep working.
+export type { QueryFailure, QueryResult } from '@/lib/queries/result';
 
 export type SessionDetailHeader = {
   id: string;
