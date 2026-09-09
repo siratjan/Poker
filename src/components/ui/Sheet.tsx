@@ -8,6 +8,9 @@ import { useEffect, useRef, type ReactNode } from 'react';
  * Slides up from the bottom, closes on backdrop click and Escape. Focus moves
  * into the panel on open and the background is inert to the pointer. Kept small
  * on purpose; WP5 builds the richer entry sheets on top of it.
+ *
+ * The ✕ in the header is a 44 px tap target like every other control on the
+ * mobile screens (Gaby WP5-F3).
  */
 export function Sheet({
   open,
@@ -73,7 +76,7 @@ export function Sheet({
             type="button"
             onClick={onClose}
             aria-label="Schließen"
-            className="flex size-9 items-center justify-center rounded-full text-lg opacity-60 transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="flex size-11 shrink-0 items-center justify-center rounded-full text-lg opacity-60 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
           >
             ✕
           </button>

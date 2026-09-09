@@ -148,6 +148,55 @@
    - Als Viewer: keine Buttons, keine „⋯“, kein Löschen im Verlauf.
    - 375 px: kein horizontales Scrollen, Tippziele ≥ 44 px.
 
+## Nacharbeit Runde 2 (Gaby-Report `qa/reports/WP5-gaby.md`, F1–F4)
+
+Der Planer hat F1–F4 zur sofortigen Behebung freigegeben; **F5 und F6 bleiben bewusst
+offen** (F5 theoretisch, F6 gehört zu WP7).
+
+- **F1 (Reconnect nach `CHANNEL_ERROR`)** – `useSessionRealtime.ts` neu aufgebaut. Die
+  Kanal-Logik steckt jetzt in der exportierten, React-freien Funktion
+  `subscribeToSession(supabase, sessionId, { onEvent, setStatus })`, die der Effekt nur
+  noch aufruft und deren Rückgabe er als Cleanup zurückgibt. Bei `CHANNEL_ERROR` /
+  `TIMED_OUT` wird nicht mehr `channel.subscribe()` ein zweites Mal gerufen (das ist mit
+  `@supabase/realtime-js` 2.116 im Zustand `errored` ein No-op), sondern der kaputte Kanal
+  über `supabase.removeChannel` entfernt und ein **neuer** Kanal mit allen drei Filtern und
+  **mit Status-Callback** aufgebaut – dadurch springt der Status nach erfolgreichem Rejoin
+  wieder auf `live` und der 10-s-Hinweis verschwindet. Weiterhin genau ein Versuch
+  (`retried`), danach greift der Hinweis „Verbindung getrennt“. Ein Kanal wird über
+  `takeActiveChannel()` höchstens einmal entfernt, ein doppeltes Abo ist damit
+  ausgeschlossen; wirft der Client beim Reconnect, wird geloggt und der Hinweis übernimmt.
+- **F2 (✕ bei optimistischen Einträgen)** – `HistoryList` bekommt `pendingIds`
+  (`ReadonlySet<string>`, in `SessionDetailClient` aus den Pending-Buy-ins ohne `realId`).
+  Für solche Zeilen ist das ✕ `disabled` (44 px bleiben, kein Layout-Sprung), die
+  Zweitzeile sagt „wird gespeichert …“ und das `aria-label` ebenso; zusätzlich ignoriert
+  der `onDelete`-Handler in `SessionDetailClient` pending-Ids. Ein
+  `deleteEntry({ id: 'pending-…' })` kann so nicht mehr abgeschickt werden.
+- **F3 (Tippziel Sheet-Kopf)** – Das ✕ in `src/components/ui/Sheet.tsx` ist von `size-9`
+  (36 px) auf `size-11` (44 px) vergrößert. Übrige WP5-Tippziele nachgemessen: Karte
+  72 px, „⋯“ 44 px, Verlauf-✕ 44 px, Schnellbeträge 56 px, Spielerzeile im
+  Teilnehmer-Sheet 52 px, Suchfeld 44 px, `Button` md 44 px / lg 52 px – alle ≥ 44 px,
+  weitere Änderungen waren nicht nötig.
+- **F4 (Refresh nach Fehler)** – `run()` in `SessionDetailClient` ruft im Fehlerfall
+  zusätzlich zum Toast `refresh()`; ebenso der Fehlerpfad des optimistischen Buy-ins und
+  der Fall „kein Stack mehr vorhanden“ beim Stack-Ändern. Meldung und Anzeige passen damit
+  wieder zusammen, wenn der Fehler von einer fremden Änderung kommt.
+
+**Neue Tests:** `src/components/sessions/useSessionRealtime.test.ts` (9 Fälle) treibt
+`subscribeToSession` mit einem gefälschten Kanal: ein Abo mit drei Filtern, `live` +
+Weiterleitung der Events, Ersetzen des kaputten Kanals (alter entfernt, neuer mit
+Callback), Rückkehr auf `live` ohne Hinweis, genau ein Retry und danach der Hinweis nach
+exakt 10 s, Hinweis nur einmal, Teardown entfernt den aktiven Kanal und schweigt danach,
+kein doppeltes Entfernen, Fehler beim Reconnect wird abgefangen.
+
+**Prüfung Runde 2:** `npm run check` grün – 32 Dateien, 670 Tests (inkl. Gabys
+`tests/gaby/wp5-session.gaby.test.ts`, unverändert). `npm run build` grün.
+
+**Was der Planer im Browser prüfen sollte:** Punkt 3 aus Gabys Liste (Netzwerk kappen,
+15 s warten, Netzwerk zurück → der Hinweis „Verbindung getrennt“ muss von selbst
+verschwinden und neue Einträge wieder ankommen), das ✕ im Sheet-Kopf bei 375 px, und ein
+Buy-in mit sofortigem Tipp auf das ✕ im Verlauf (das ✕ ist blass und reagiert nicht,
+bis „wird gespeichert …“ verschwunden ist).
+
 ## Vorschläge (außerhalb des Pakets)
 
 - `listSessions`/`listPlayers` auf dasselbe `QueryResult`-Muster umstellen (Rest von

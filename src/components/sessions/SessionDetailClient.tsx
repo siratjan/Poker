@@ -130,6 +130,13 @@ export function SessionDetailClient({
 
   const history = useMemo(() => sortEntriesNewestFirst(mergedEntries), [mergedEntries]);
 
+  // Ids of rows the server has not confirmed yet: they carry a `pending-…` id,
+  // which no delete could ever hit (Gaby WP5-F2).
+  const pendingIds = useMemo<ReadonlySet<string>>(
+    () => new Set(visiblePending.filter((item) => item.realId === null).map((item) => item.tempId)),
+    [visiblePending],
+  );
+
   const nameFor = useCallback(
     (playerId: string) =>
       participants.find((participant) => participant.playerId === playerId)?.name ?? 'Unbekannt',
@@ -142,7 +149,12 @@ export function SessionDetailClient({
   const selected = selectedParticipant(derived, sheet);
   const closeSheet = useCallback(() => setSheet({ kind: 'none' }), []);
 
-  /** Runs an action, shows its German error and refreshes on success. */
+  /**
+   * Runs an action and shows its German message. Refreshes in both cases: a
+   * rejected write almost always means somebody else changed the session
+   * (`SESSION_CLOSED`, `PLAYER_ALREADY_CASHED_OUT`, `PAYOUT_EXCEEDS_CASHBOX`),
+   * so the screen has to catch up with the toast (Gaby WP5-F4).
+   */
   async function run<T>(
     action: () => Promise<ActionResult<T>>,
     success?: string,
@@ -150,6 +162,7 @@ export function SessionDetailClient({
     const result = await action();
     if (!result.ok) {
       showError(result.error.message);
+      refresh();
       return false;
     }
     if (success !== undefined) showSuccess(success);
@@ -190,6 +203,9 @@ export function SessionDetailClient({
     if (!result.ok) {
       setPending((current) => current.filter((item) => item.tempId !== tempId));
       showError(result.error.message);
+      // Same reasoning as in `run`: the rejection usually comes from a change
+      // somebody else made (Gaby WP5-F4).
+      refresh();
       return false;
     }
 
@@ -289,7 +305,11 @@ export function SessionDetailClient({
           entries={history}
           nameFor={nameFor}
           canEdit={mayAct}
-          onDelete={(entry) => setSheet({ kind: 'confirmDeleteEntry', entry })}
+          pendingIds={pendingIds}
+          onDelete={(entry) => {
+            if (pendingIds.has(entry.id)) return;
+            setSheet({ kind: 'confirmDeleteEntry', entry });
+          }}
         />
       </div>
 
@@ -341,6 +361,7 @@ export function SessionDetailClient({
             const cashOutId = cashOutEntryId(entries, selected.playerId);
             if (cashOutId === null) {
               showError('Für diesen Spieler gibt es keinen Stack mehr.');
+              refresh();
               return Promise.resolve(false);
             }
             return run(

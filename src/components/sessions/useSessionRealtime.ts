@@ -17,7 +17,7 @@ import { createClient } from '@/lib/supabase/client';
  * - exactly one subscription per session id, also across re-renders (the effect
  *   depends on the id alone; `onChange` is kept in a ref),
  * - the channel is removed on unmount and whenever the id changes,
- * - one automatic re-subscribe after a `CHANNEL_ERROR` / `TIMED_OUT`,
+ * - one automatic reconnect after a `CHANNEL_ERROR` / `TIMED_OUT`,
  * - status `disconnected` if the channel is not live again after 10 seconds.
  */
 
@@ -39,68 +39,134 @@ export function useSessionRealtime(sessionId: string, onChange: () => void): Rea
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase.channel(`session:${sessionId}`);
-
-    let cancelled = false;
-    let retried = false;
-    let hintTimer: ReturnType<typeof setTimeout> | null = null;
-
-    function armDisconnectHint() {
-      if (hintTimer !== null) return;
-      hintTimer = setTimeout(() => {
-        if (!cancelled) setStatus('disconnected');
-      }, DISCONNECT_HINT_MS);
-    }
-
-    function clearDisconnectHint() {
-      if (hintTimer === null) return;
-      clearTimeout(hintTimer);
-      hintTimer = null;
-    }
-
-    const tables: { table: string; filter: string }[] = [
-      { table: 'entries', filter: `session_id=eq.${sessionId}` },
-      { table: 'session_players', filter: `session_id=eq.${sessionId}` },
-      { table: 'sessions', filter: `id=eq.${sessionId}` },
-    ];
-
-    for (const { table, filter } of tables) {
-      channel.on('postgres_changes', { event: '*', schema: 'public', table, filter }, () => {
-        if (!cancelled) latestOnChange.current();
-      });
-    }
-
-    channel.subscribe((channelStatus) => {
-      if (cancelled) return;
-
-      if (channelStatus === 'SUBSCRIBED') {
-        clearDisconnectHint();
-        setStatus('live');
-        return;
-      }
-
-      if (channelStatus === 'CHANNEL_ERROR' || channelStatus === 'TIMED_OUT') {
-        setStatus('connecting');
-        armDisconnectHint();
-        if (!retried) {
-          retried = true;
-          // One reconnect attempt; if it fails too, the hint timer takes over
-          // and the user gets „Verbindung getrennt“ with a reload button.
-          try {
-            channel.subscribe();
-          } catch (error) {
-            console.error('[realtime] resubscribe failed:', error);
-          }
-        }
-      }
+    return subscribeToSession(supabase, sessionId, {
+      onEvent: () => latestOnChange.current(),
+      setStatus,
     });
-
-    return () => {
-      cancelled = true;
-      clearDisconnectHint();
-      void supabase.removeChannel(channel);
-    };
   }, [sessionId]);
 
   return status;
+}
+
+/**
+ * Minimal shape of the realtime part of the Supabase client. Structural on
+ * purpose: `subscribeToSession` is the part with the reconnect logic, and a
+ * plain object is enough to unit-test it (`useSessionRealtime.test.ts`).
+ */
+export type ChannelLike<C> = {
+  on: (
+    type: 'postgres_changes',
+    filter: { event: '*'; schema: string; table: string; filter: string },
+    callback: () => void,
+  ) => C;
+  subscribe: (callback: (status: string) => void) => unknown;
+};
+
+export type RealtimeClientLike<C> = {
+  channel: (name: string) => C;
+  removeChannel: (channel: C) => unknown;
+};
+
+/** The three tables one session listens to, each filtered to that session. */
+function watchedTables(sessionId: string): { table: string; filter: string }[] {
+  return [
+    { table: 'entries', filter: `session_id=eq.${sessionId}` },
+    { table: 'session_players', filter: `session_id=eq.${sessionId}` },
+    { table: 'sessions', filter: `id=eq.${sessionId}` },
+  ];
+}
+
+/**
+ * Opens the channel and returns the teardown. Exported for the unit test.
+ *
+ * Reconnect (Gaby WP5-F1): calling `subscribe()` a second time on the same
+ * channel does nothing in `@supabase/realtime-js` 2.116 — it only re-joins from
+ * state `closed`, and after an error the channel is `errored`. So the retry
+ * removes the broken channel and builds a fresh one, again with the status
+ * callback, so the UI goes back to `live` on success. Exactly one attempt; if
+ * it fails too, the hint timer shows „Verbindung getrennt“ with a reload button.
+ */
+export function subscribeToSession<C extends ChannelLike<C>>(
+  supabase: RealtimeClientLike<C>,
+  sessionId: string,
+  handlers: { onEvent: () => void; setStatus: (status: RealtimeStatus) => void },
+  hintMs: number = DISCONNECT_HINT_MS,
+): () => void {
+  const { onEvent, setStatus } = handlers;
+
+  let cancelled = false;
+  let retried = false;
+  let active: C | null = null;
+  let hintTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function armDisconnectHint() {
+    if (hintTimer !== null) return;
+    hintTimer = setTimeout(() => {
+      if (!cancelled) setStatus('disconnected');
+    }, hintMs);
+  }
+
+  function clearDisconnectHint() {
+    if (hintTimer === null) return;
+    clearTimeout(hintTimer);
+    hintTimer = null;
+  }
+
+  /** Hands out the open channel and forgets it, so it is removed only once. */
+  function takeActiveChannel(): C | null {
+    const open = active;
+    active = null;
+    return open;
+  }
+
+  function connect() {
+    const next = supabase.channel(`session:${sessionId}`);
+    for (const { table, filter } of watchedTables(sessionId)) {
+      next.on('postgres_changes', { event: '*', schema: 'public', table, filter }, () => {
+        if (!cancelled) onEvent();
+      });
+    }
+    active = next;
+    next.subscribe(handleStatus);
+  }
+
+  function handleStatus(channelStatus: string) {
+    if (cancelled) return;
+
+    if (channelStatus === 'SUBSCRIBED') {
+      clearDisconnectHint();
+      setStatus('live');
+      return;
+    }
+
+    if (channelStatus !== 'CHANNEL_ERROR' && channelStatus !== 'TIMED_OUT') return;
+
+    setStatus('connecting');
+    armDisconnectHint();
+    if (retried) return;
+    retried = true;
+
+    const broken = takeActiveChannel();
+    if (broken !== null) {
+      try {
+        void supabase.removeChannel(broken);
+      } catch (error) {
+        console.error('[realtime] removing the broken channel failed:', error);
+      }
+    }
+    try {
+      connect();
+    } catch (error) {
+      console.error('[realtime] reconnect failed:', error);
+    }
+  }
+
+  connect();
+
+  return () => {
+    cancelled = true;
+    clearDisconnectHint();
+    const channel = takeActiveChannel();
+    if (channel !== null) void supabase.removeChannel(channel);
+  };
 }
