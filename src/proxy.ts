@@ -51,10 +51,18 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 export const config = {
   matcher: [
     /*
-     * All request paths except Next.js internals, the icons of the future PWA
-     * and static image files. Everything that reaches the proxy needs a
-     * session, unless src/lib/auth/paths.ts says it is public.
+     * All request paths except Next.js internals, the PWA files and static
+     * image files. Everything that reaches the proxy needs a session, unless
+     * src/lib/auth/paths.ts says it is public.
+     *
+     * `_next/` as a whole rather than `_next/static|_next/image` (Gaby WP2-F1,
+     * fixed in WP9): every other `_next` endpoint — the dev HMR channel above
+     * all — used to run through the proxy and be redirected to /login.
+     *
+     * `manifest.webmanifest` and `icons/` have to stay out as well, otherwise
+     * the installability check of an anonymous browser sees a redirect instead
+     * of the manifest and the app is not offered for installation (WP9, step 1).
      */
-    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|robots.txt|sitemap.xml|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/|favicon.ico|manifest.webmanifest|robots.txt|sitemap.xml|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 };

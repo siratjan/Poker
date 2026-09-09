@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { removeWhitelist, upsertWhitelist } from '@/actions/admin';
+import { useWritesBlocked } from '@/components/app/ConnectionProvider';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -48,9 +49,11 @@ function AddForm() {
   const [role, setRole] = useState<Role>('editor');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (offline) return;
     setPending(true);
     setError(null);
 
@@ -102,7 +105,11 @@ function AddForm() {
           ))}
         </select>
 
-        <Button type="submit" className="flex-1" disabled={pending || email.trim() === ''}>
+        <Button
+          type="submit"
+          className="flex-1"
+          disabled={pending || offline || email.trim() === ''}
+        >
           {pending ? 'Speichert …' : 'Aufnehmen'}
         </Button>
       </div>
@@ -114,8 +121,10 @@ function WhitelistRow({ entry }: { entry: WhitelistEntry }) {
   const router = useRouter();
   const { showSuccess, showError } = useToast();
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   async function onRemove() {
+    if (offline) return;
     setPending(true);
     const result = await removeWhitelist({ email: entry.email });
     setPending(false);
@@ -134,7 +143,7 @@ function WhitelistRow({ entry }: { entry: WhitelistEntry }) {
         <span className="truncate text-sm font-medium">{entry.email}</span>
         <span className="text-xs opacity-60">{ROLE_LABELS[entry.role]}</span>
       </div>
-      <Button variant="secondary" onClick={onRemove} disabled={pending}>
+      <Button variant="secondary" onClick={onRemove} disabled={pending || offline}>
         {pending ? 'Entfernt …' : 'Entfernen'}
       </Button>
     </Card>

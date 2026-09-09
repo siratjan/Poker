@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { formatCents, formatSignedCents } from '@/lib/money';
 import { describeDiscrepancy, sortedByResult } from '@/lib/settlement/shareText';
 import type { FrozenSettlement } from '@/lib/settlement/types';
+import { amountToneClasses } from '@/lib/ui/amountTone';
 
 /**
  * The settlement of one evening (docs/ARBEITSPAKETE.md WP6, step 3), in the
@@ -315,10 +316,12 @@ function Warning({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * WP9, step 4: the plus/minus colours live in one place now, together with
+ * their measured WCAG AA ratios (`src/lib/ui/amountTone.ts`).
+ */
 function resultColor(cents: number): string {
-  if (cents > 0) return 'text-emerald-700 dark:text-emerald-400';
-  if (cents < 0) return 'text-red-700 dark:text-red-400';
-  return '';
+  return amountToneClasses(cents);
 }
 
 function nameOf(names: Readonly<Record<string, string>>, playerId: string): string {

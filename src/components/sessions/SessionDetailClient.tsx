@@ -24,8 +24,9 @@ import {
   ParticipantActionsSheet,
   PayoutSheet,
 } from '@/components/sessions/EntrySheets';
+import { useReportRealtimeStatus } from '@/components/app/ConnectionProvider';
 import { useSessionRealtime } from '@/components/sessions/useSessionRealtime';
-import { Badge, SessionStatusBadge } from '@/components/ui/Badge';
+import { SessionStatusBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -108,6 +109,10 @@ export function SessionDetailClient({
 
   const refresh = useCallback(() => router.refresh(), [router]);
   const realtimeStatus = useSessionRealtime(session.id, refresh);
+  // The status feeds the one banner in the app shell (WP9, step 2) instead of a
+  // second notice on this screen; „Verbindung getrennt“ plus „Neu laden“ now
+  // live in `ConnectionBanner`, where being offline outranks a dead channel.
+  useReportRealtimeStatus(realtimeStatus);
 
   // Timers that drop a confirmed optimistic row; cleared on unmount so no
   // state is written into a component that is gone.
@@ -251,7 +256,6 @@ export function SessionDetailClient({
         </div>
         {session.name ? <p className="text-sm opacity-80">{session.name}</p> : null}
         {isOpen ? null : <ClosedNotice detail={detail} />}
-        <RealtimeNotice status={realtimeStatus} onReload={refresh} />
       </header>
 
       <div className="grid grid-cols-2 gap-2">
@@ -454,6 +458,8 @@ export function SessionDetailClient({
         <ConfirmDeleteSheet
           title={`${selected.name} entfernen?`}
           description="Der Spieler wird nur aus dieser Session entfernt. Er bleibt in der Spielerliste."
+          confirmLabel="Entfernen"
+          pendingLabel="Entfernt …"
           onConfirm={() =>
             run(
               () => removeParticipant({ sessionId: session.id, playerId: selected.playerId }),
@@ -506,7 +512,7 @@ function ClosedNotice({ detail }: { detail: SessionDetail }) {
         {session.closedByName === null ? '' : ` von ${session.closedByName}`}.
       </span>
       {session.discrepancyCents !== null && session.discrepancyCents !== 0 ? (
-        <span className="text-red-600 dark:text-red-400">
+        <span className="tabular-nums text-red-700 dark:text-red-400">
           Differenz {formatSignedCents(session.discrepancyCents)}
         </span>
       ) : null}
@@ -517,29 +523,6 @@ function ClosedNotice({ detail }: { detail: SessionDetail }) {
         Nichts an dieser Session lässt sich noch ändern. Die Abrechnung unten ist die
         gespeicherte.
       </span>
-    </div>
-  );
-}
-
-/** „Verbindung getrennt“ once the channel has been silent for 10 seconds. */
-function RealtimeNotice({
-  status,
-  onReload,
-}: {
-  status: 'connecting' | 'live' | 'disconnected';
-  onReload: () => void;
-}) {
-  if (status !== 'disconnected') return null;
-
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-amber-500/15 px-3 py-2 text-sm">
-      <span className="flex items-center gap-2">
-        <Badge tone="muted">Verbindung getrennt</Badge>
-        <span className="opacity-80">Neue Einträge kommen gerade nicht automatisch an.</span>
-      </span>
-      <Button variant="secondary" onClick={onReload}>
-        Neu laden
-      </Button>
     </div>
   );
 }

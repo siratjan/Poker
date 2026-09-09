@@ -139,7 +139,7 @@ function SessionRow({ session }: { session: PlayerSessionRow }) {
           ) : (
             // Closed without a settlement line — cannot happen through the app,
             // shown as „kein Ergebnis“ rather than as a made-up 0,00 €.
-            <span className="shrink-0 text-sm opacity-50">kein Ergebnis</span>
+            <span className="shrink-0 text-sm opacity-70">kein Ergebnis</span>
           )}
         </div>
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { closeSession, previewSettlement, type SettlementPreview } from '@/actions/close';
+import { useWritesBlocked } from '@/components/app/ConnectionProvider';
+import { OfflineNote } from '@/components/app/OfflineNote';
 import { SettlementView } from '@/components/settlement/SettlementView';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -187,6 +189,7 @@ function ConfirmCloseSheet({
     { kind: 'loading' } | { kind: 'ready'; preview: SettlementPreview } | { kind: 'error'; message: string }
   >({ kind: 'loading' });
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   useEffect(() => {
     let active = true;
@@ -204,7 +207,7 @@ function ConfirmCloseSheet({
   }, [sessionId]);
 
   async function confirm() {
-    if (pending) return;
+    if (pending || offline) return;
     setPending(true);
     const done = await onConfirm();
     setPending(false);
@@ -258,7 +261,7 @@ function ConfirmCloseSheet({
         <Button
           size="lg"
           variant="danger"
-          disabled={pending || ready === null || !ready.canClose}
+          disabled={pending || offline || ready === null || !ready.canClose}
           onClick={() => void confirm()}
         >
           {pending ? 'Schließt ab …' : 'Jetzt abschließen'}
@@ -266,6 +269,7 @@ function ConfirmCloseSheet({
         <Button size="lg" variant="secondary" onClick={onClose}>
           Abbrechen
         </Button>
+        <OfflineNote />
       </div>
     </Sheet>
   );

@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { formatCents } from '@/lib/money';
 import type { DerivedParticipant } from '@/lib/session/derive';
 import { buyInLabel, formatSignedCents, stackLabel } from '@/lib/session/labels';
+import { amountToneClasses } from '@/lib/ui/amountTone';
 
 /**
  * One participant of the session (docs/ARBEITSPAKETE.md WP5, step 4): name,
@@ -39,8 +40,8 @@ export function ParticipantCard({
     <div className="flex w-full items-center justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="truncate text-base font-semibold">{participant.name}</span>
-        <span className="text-xs opacity-70">{buyInLabel(participant)}</span>
-        <span className="text-xs opacity-70">
+        <span className="text-xs tabular-nums opacity-70">{buyInLabel(participant)}</span>
+        <span className="text-xs tabular-nums opacity-70">
           {stackLabel(participant)}
           {participant.payout > 0 ? ` · bar erhalten ${formatCents(participant.payout)}` : ''}
         </span>
@@ -49,16 +50,14 @@ export function ParticipantCard({
 
       <div className="shrink-0 text-right">
         {participant.net === null ? (
-          <span className="text-sm opacity-50">–</span>
+          <span className="text-sm opacity-60" aria-label="noch kein Ergebnis">
+            –
+          </span>
         ) : (
           <span
             className={clsx(
               'text-base font-semibold tabular-nums',
-              participant.net > 0
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : participant.net < 0
-                  ? 'text-red-600 dark:text-red-400'
-                  : 'opacity-70',
+              amountToneClasses(participant.net),
             )}
           >
             {formatSignedCents(participant.net)}
@@ -99,7 +98,7 @@ export function ParticipantCard({
         type="button"
         onClick={onMenu}
         aria-label={`Weitere Aktionen für ${participant.name}`}
-        className="flex w-11 shrink-0 items-center justify-center rounded-r-2xl text-lg opacity-50 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+        className="flex w-11 shrink-0 items-center justify-center rounded-r-2xl text-lg opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
       >
         ⋯
       </button>

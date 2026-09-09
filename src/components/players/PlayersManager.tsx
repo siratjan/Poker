@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { createPlayer, renamePlayer } from '@/actions/players';
+import { useWritesBlocked } from '@/components/app/ConnectionProvider';
+import { OfflineNote } from '@/components/app/OfflineNote';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -141,9 +143,11 @@ function CreatePlayer() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (offline) return;
     setPending(true);
     setError(null);
 
@@ -174,9 +178,10 @@ function CreatePlayer() {
         error={error}
         onChange={(event) => setName(event.target.value)}
       />
-      <Button type="submit" disabled={pending || name.trim().length === 0}>
+      <Button type="submit" disabled={pending || offline || name.trim().length === 0}>
         {pending ? 'Wird angelegt …' : 'Anlegen'}
       </Button>
+      <OfflineNote />
     </form>
   );
 }
@@ -188,6 +193,7 @@ function PlayerRow({ player, canEdit }: { player: PlayerStats; canEdit: boolean 
   const [name, setName] = useState(player.name);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   function startEditing() {
     setName(player.name);
@@ -197,6 +203,7 @@ function PlayerRow({ player, canEdit }: { player: PlayerStats; canEdit: boolean 
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (offline) return;
     setPending(true);
     setError(null);
 
@@ -230,7 +237,11 @@ function PlayerRow({ player, canEdit }: { player: PlayerStats; canEdit: boolean 
             onChange={(event) => setName(event.target.value)}
           />
           <div className="flex gap-2">
-            <Button type="submit" disabled={pending || name.trim().length === 0} className="flex-1">
+            <Button
+              type="submit"
+              disabled={pending || offline || name.trim().length === 0}
+              className="flex-1"
+            >
               {pending ? 'Speichert …' : 'Speichern'}
             </Button>
             <Button type="button" variant="secondary" onClick={() => setEditing(false)}>
@@ -276,7 +287,7 @@ function PlayerRow({ player, canEdit }: { player: PlayerStats; canEdit: boolean 
           type="button"
           onClick={startEditing}
           aria-label={`${player.name} umbenennen`}
-          className="flex w-11 shrink-0 items-center justify-center rounded-r-2xl text-base opacity-50 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+          className="flex w-11 shrink-0 items-center justify-center rounded-r-2xl text-base opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
         >
           ✎
         </button>

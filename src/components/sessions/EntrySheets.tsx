@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { useWritesBlocked } from '@/components/app/ConnectionProvider';
+import { OfflineNote } from '@/components/app/OfflineNote';
 import { Button, buttonClasses } from '@/components/ui/Button';
 import { Sheet } from '@/components/ui/Sheet';
 import { AmountField } from '@/components/sessions/AmountField';
@@ -18,6 +20,11 @@ import type { PlayerListItem } from '@/lib/queries/players';
  * A submit handler returns `true` when the action succeeded; the sheet then
  * closes. On `false` it stays open with the value the user typed, so nothing
  * has to be entered twice after a rejected write.
+ *
+ * WP9, step 2: while the device is offline every confirming button is disabled
+ * and says why (`useWritesBlocked` / `OfflineNote`). Nothing is queued — there
+ * is no offline cache, and a buy-in that turns up half an hour later would be
+ * worse than one that was never entered. Closing and cancelling stay enabled.
  */
 
 type SubmitResult = Promise<boolean>;
@@ -101,12 +108,13 @@ export function BuyInSheet({
 }) {
   const [value, setValue] = useState('');
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
   const cents = amountFromInput(value, false);
   // Preselect the payment method this player used last (WP5, step 4).
   const preferred: PaymentMethod = participant.lastPayment ?? 'cash';
 
   async function submit(payment: PaymentMethod) {
-    if (cents === null || pending) return;
+    if (cents === null || pending || offline) return;
     setPending(true);
     const done = await onSubmit(cents, payment);
     setPending(false);
@@ -127,7 +135,7 @@ export function BuyInSheet({
           <Button
             size="lg"
             variant={preferred === 'cash' ? 'primary' : 'secondary'}
-            disabled={cents === null || pending}
+            disabled={cents === null || pending || offline}
             onClick={() => void submit('cash')}
           >
             Bar
@@ -135,13 +143,14 @@ export function BuyInSheet({
           <Button
             size="lg"
             variant={preferred === 'credit' ? 'primary' : 'secondary'}
-            disabled={cents === null || pending}
+            disabled={cents === null || pending || offline}
             onClick={() => void submit('credit')}
           >
             Auf Liste
           </Button>
         </div>
-        <p className="text-xs opacity-60">
+        <OfflineNote />
+        <p className="text-xs tabular-nums opacity-70">
           Bisher: {formatCents(participant.cashIn)} bar, {formatCents(participant.creditIn)} Liste.
         </p>
       </div>
@@ -165,10 +174,11 @@ export function CashOutSheet({
     mode === 'edit' && participant.stack !== null ? euroValue(participant.stack) : '',
   );
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
   const cents = amountFromInput(value, true);
 
   async function submit() {
-    if (cents === null || pending) return;
+    if (cents === null || pending || offline) return;
     setPending(true);
     const done = await onSubmit(cents);
     setPending(false);
@@ -196,14 +206,19 @@ export function CashOutSheet({
           </p>
         ) : null}
         {participant.payout > 0 ? (
-          <p className="text-xs opacity-70">
+          <p className="text-xs tabular-nums opacity-70">
             Bereits bar erhalten: {formatCents(participant.payout)}. Der Stack darf nicht kleiner
             sein.
           </p>
         ) : null}
-        <Button size="lg" disabled={cents === null || pending} onClick={() => void submit()}>
+        <Button
+          size="lg"
+          disabled={cents === null || pending || offline}
+          onClick={() => void submit()}
+        >
           {pending ? 'Speichert …' : 'Eintragen'}
         </Button>
+        <OfflineNote />
       </div>
     </Sheet>
   );
@@ -225,10 +240,11 @@ export function PayoutSheet({
 }) {
   const [value, setValue] = useState('');
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
   const cents = amountFromInput(value, false);
 
   async function submit() {
-    if (cents === null || pending) return;
+    if (cents === null || pending || offline) return;
     setPending(true);
     const done = await onSubmit(cents);
     setPending(false);
@@ -240,7 +256,7 @@ export function PayoutSheet({
       <div className="flex flex-col gap-4 pb-2">
         <AmountField label="Betrag" value={value} onChange={setValue} autoFocus />
 
-        <div className="flex flex-col gap-1 rounded-xl bg-black/5 px-3 py-2 text-xs dark:bg-white/10">
+        <div className="flex flex-col gap-1 rounded-xl bg-black/5 px-3 py-2 text-xs tabular-nums dark:bg-white/10">
           <span>Kasse: {formatCents(cashBoxCents)}</span>
           <span>Stack: {formatCents(participant.stack ?? 0)}</span>
           {participant.payout > 0 ? (
@@ -255,9 +271,14 @@ export function PayoutSheet({
           )}
         </div>
 
-        <Button size="lg" disabled={cents === null || pending} onClick={() => void submit()}>
+        <Button
+          size="lg"
+          disabled={cents === null || pending || offline}
+          onClick={() => void submit()}
+        >
           {pending ? 'Speichert …' : 'Auszahlen'}
         </Button>
+        <OfflineNote />
       </div>
     </Sheet>
   );
@@ -284,13 +305,14 @@ export function AddParticipantSheet({
 }) {
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   const needle = query.trim().toLowerCase();
   const matches = needle === '' ? players : players.filter((p) => p.name.toLowerCase().includes(needle));
   const exactMatch = players.some((p) => p.name.trim().toLowerCase() === needle);
 
   async function run(action: () => SubmitResult) {
-    if (pending) return;
+    if (pending || offline) return;
     setPending(true);
     const done = await action();
     setPending(false);
@@ -312,10 +334,16 @@ export function AddParticipantSheet({
         />
 
         {needle.length > 0 && !exactMatch ? (
-          <Button size="lg" disabled={pending} onClick={() => void run(() => onAddNew(query))}>
+          <Button
+            size="lg"
+            disabled={pending || offline}
+            onClick={() => void run(() => onAddNew(query))}
+          >
             Neuen Spieler „{query.trim()}“ anlegen
           </Button>
         ) : null}
+
+        <OfflineNote />
 
         {matches.length === 0 ? (
           <p className="px-1 py-2 text-sm opacity-70">
@@ -331,7 +359,7 @@ export function AddParticipantSheet({
               <li key={player.id}>
                 <button
                   type="button"
-                  disabled={pending}
+                  disabled={pending || offline}
                   onClick={() => void run(() => onAddExisting(player.id))}
                   className="min-h-[52px] w-full rounded-xl border border-black/15 px-4 text-left text-base transition hover:bg-black/5 disabled:opacity-60 dark:border-white/20 dark:hover:bg-white/10"
                 >
@@ -346,22 +374,38 @@ export function AddParticipantSheet({
   );
 }
 
-/** Confirmation before an entry is deleted for good. */
+/**
+ * Confirmation before something is deleted for good (WP9, step 7).
+ *
+ * The one pattern for every destructive action of the app: a bottom sheet, the
+ * consequence spelled out in plain German, the red button first and „Abbrechen“
+ * below it. Used for „Teilnehmer entfernen“ and „Eintrag löschen“; reopening a
+ * closed session (`ClosedSessionSection`) and closing one with a difference
+ * (`CloseSessionPanel`) follow the same shape but additionally demand a reason.
+ *
+ * `confirmLabel` lets the button say what actually happens („Entfernen“ vs
+ * „Löschen“) instead of a generic „OK“.
+ */
 export function ConfirmDeleteSheet({
   title,
   description,
+  confirmLabel = 'Löschen',
+  pendingLabel = 'Löscht …',
   onConfirm,
   onClose,
 }: {
   title: string;
   description: string;
+  confirmLabel?: string;
+  pendingLabel?: string;
   onConfirm: () => SubmitResult;
   onClose: () => void;
 }) {
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   async function confirm() {
-    if (pending) return;
+    if (pending || offline) return;
     setPending(true);
     const done = await onConfirm();
     setPending(false);
@@ -372,12 +416,20 @@ export function ConfirmDeleteSheet({
     <Sheet open onClose={onClose} title={title}>
       <div className="flex flex-col gap-3 pb-2">
         <p className="text-sm opacity-80">{description}</p>
-        <Button size="lg" variant="danger" disabled={pending} onClick={() => void confirm()}>
-          {pending ? 'Löscht …' : 'Löschen'}
+        <Button
+          size="lg"
+          variant="danger"
+          disabled={pending || offline}
+          onClick={() => void confirm()}
+        >
+          {pending ? pendingLabel : confirmLabel}
         </Button>
+        {/* „Abbrechen“ stays enabled offline — getting out of a sheet must
+            never depend on the network. */}
         <Button size="lg" variant="secondary" onClick={onClose}>
           Abbrechen
         </Button>
+        <OfflineNote />
       </div>
     </Sheet>
   );
