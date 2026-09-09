@@ -52,7 +52,9 @@ function cashBlock(settlement: FrozenSettlement, names: Readonly<Record<string, 
     lines.push('- Es ist kein Bargeld zu verteilen.');
   } else {
     lines.push(...rows);
-    lines.push(`Summe: ${formatCents(sumCashFromBox(settlement))}`);
+    // „Summe = Kasse“ (WP6, step 3): the box after the early payouts, which is
+    // Σ cashFromBox plus whatever stays in the box on the next line.
+    lines.push(`Summe: ${formatCents(settlement.cashBoxAfterPayouts)}`);
   }
   if (settlement.unallocatedCash > 0) {
     lines.push(`Bleibt in der Kasse: ${formatCents(settlement.unallocatedCash)} (Differenz)`);

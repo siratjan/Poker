@@ -1,5 +1,7 @@
+import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { SessionDetailClient } from '@/components/sessions/SessionDetailClient';
+import { sessionLogHref } from '@/lib/audit/filters';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { loginPathFor } from '@/lib/auth/paths';
 import { canEdit, isAdmin } from '@/lib/auth/roles';
@@ -39,11 +41,20 @@ export default async function SessionDetailPage({ params }: PageProps<'/sessions
   const allPlayers = mayEdit && result.data.session.status === 'open' ? await listPlayers() : [];
 
   return (
-    <SessionDetailClient
-      detail={result.data}
-      allPlayers={allPlayers}
-      canEdit={mayEdit}
-      isAdmin={isAdmin(user.role)}
-    />
+    <>
+      <SessionDetailClient
+        detail={result.data}
+        allPlayers={allPlayers}
+        canEdit={mayEdit}
+        isAdmin={isAdmin(user.role)}
+      />
+      {/* WP8, step 4: the audit log of this session, pre-filtered. */}
+      <Link
+        href={sessionLogHref(id)}
+        className="mt-4 flex min-h-[44px] items-center justify-center text-sm font-medium text-emerald-700 dark:text-emerald-400"
+      >
+        Log dieser Session
+      </Link>
+    </>
   );
 }

@@ -487,7 +487,10 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
-/** Head of a closed session; the frozen settlement itself follows in WP6. */
+/**
+ * Head of a closed session: when, by whom, difference and comment. The frozen
+ * settlement below it is rendered by `ClosedSessionSection`.
+ */
 function ClosedNotice({ detail }: { detail: SessionDetail }) {
   const { session } = detail;
 

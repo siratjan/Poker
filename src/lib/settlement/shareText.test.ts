@@ -128,7 +128,9 @@ describe('buildShareText', () => {
         'Aus der Kasse:',
         '- A bekommt 90,00 € bar',
         '- B bekommt 100,00 € bar',
-        'Summe: 190,00 €',
+        // „Summe = Kasse“ (WP6, step 3): 190,00 € handed out + 10,00 € left in
+        // the box = the 200,00 € that were paid in cash.
+        'Summe: 200,00 €',
         'Bleibt in der Kasse: 10,00 € (Differenz)',
         '',
         'Überweisungen:',
