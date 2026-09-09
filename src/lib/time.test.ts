@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   berlinToday,
+  formatBerlinDateTime,
+  formatBerlinTime,
   formatPlayedOn,
   isValidCalendarDate,
   maxPlayedOn,
@@ -68,5 +70,29 @@ describe('formatPlayedOn', () => {
 
   it('returns the input unchanged for an invalid date', () => {
     expect(formatPlayedOn('not-a-date')).toBe('not-a-date');
+  });
+});
+
+describe('formatBerlinTime', () => {
+  it('renders a UTC timestamp as Berlin time of day (summer, +2)', () => {
+    expect(formatBerlinTime('2026-09-09T19:14:00.000Z')).toBe('21:14');
+  });
+
+  it('renders a winter timestamp with +1', () => {
+    expect(formatBerlinTime('2026-01-15T19:14:00.000Z')).toBe('20:14');
+  });
+
+  it('returns the input unchanged for an unparsable value', () => {
+    expect(formatBerlinTime('not-a-timestamp')).toBe('not-a-timestamp');
+  });
+});
+
+describe('formatBerlinDateTime', () => {
+  it('renders date and time in Berlin', () => {
+    expect(formatBerlinDateTime('2026-09-09T22:30:00.000Z')).toBe('10.09.2026, 00:30');
+  });
+
+  it('returns the input unchanged for an unparsable value', () => {
+    expect(formatBerlinDateTime('nope')).toBe('nope');
   });
 });

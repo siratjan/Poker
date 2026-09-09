@@ -72,6 +72,37 @@ export function formatPlayedOn(value: string): string {
   return `${weekday}, ${date}`;
 }
 
+/**
+ * Time of day of a `timestamptz` in Europe/Berlin: `"2026-09-09T19:14:00Z"` ->
+ * `"21:14"` (docs/ARBEITSPAKETE.md WP5: the history shows `21:14 · Ali · …`).
+ * An unparsable value is returned unchanged rather than as „Invalid Date“.
+ */
+export function formatBerlinTime(value: string): string {
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return value;
+
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: 'Europe/Berlin',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(at);
+}
+
+/** Date and time of a `timestamptz` in Europe/Berlin: `"11.09.2026, 21:14"`. */
+export function formatBerlinDateTime(value: string): string {
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return value;
+
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: 'Europe/Berlin',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(at);
+}
+
 /** Adds `days` to a `YYYY-MM-DD` string, returning `YYYY-MM-DD`. */
 function addDays(value: string, days: number): string {
   const [y, m, d] = value.split('-').map(Number);

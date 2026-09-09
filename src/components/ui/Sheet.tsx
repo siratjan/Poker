@@ -34,7 +34,12 @@ export function Sheet({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    panel.current?.focus();
+    // Move focus into the panel — unless a field inside already claimed it via
+    // `autoFocus` (WP5 sheets), which would otherwise be taken away again and
+    // the mobile keyboard would not open.
+    if (!panel.current?.contains(document.activeElement)) {
+      panel.current?.focus();
+    }
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);

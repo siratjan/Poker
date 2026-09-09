@@ -1,0 +1,506 @@
+'use client';
+
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  addBuyIn,
+  addCashOut,
+  addParticipant,
+  addParticipantByNewPlayer,
+  addPayout,
+  deleteEntry,
+  removeParticipant,
+  updateCashOut,
+} from '@/actions/entries';
+import { HistoryList } from '@/components/sessions/HistoryList';
+import { ParticipantCard } from '@/components/sessions/ParticipantCard';
+import {
+  AddParticipantSheet,
+  BuyInSheet,
+  CashOutSheet,
+  ConfirmDeleteSheet,
+  ParticipantActionsSheet,
+  PayoutSheet,
+} from '@/components/sessions/EntrySheets';
+import { useSessionRealtime } from '@/components/sessions/useSessionRealtime';
+import { Badge, SessionStatusBadge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { useToast } from '@/components/ui/Toast';
+import type { ActionResult } from '@/lib/actions/result';
+import { formatCents } from '@/lib/money';
+import type { PlayerListItem } from '@/lib/queries/players';
+import type { SessionDetail } from '@/lib/queries/sessionDetail';
+import {
+  deriveSession,
+  previewCashEntitlement,
+  sortEntriesNewestFirst,
+  type DerivedParticipant,
+  type PaymentMethod,
+  type SessionEntry,
+} from '@/lib/session/derive';
+import { buyInToast, describeEntry, formatSignedCents } from '@/lib/session/labels';
+import { formatBerlinDateTime, formatPlayedOn } from '@/lib/time';
+
+/**
+ * Session detail (docs/ARBEITSPAKETE.md WP5, step 4). Holds the sheet state,
+ * the optimistic buy-in and the realtime subscription; the data itself comes
+ * pre-rendered from the server component and is refreshed with
+ * `router.refresh()` after every write and every realtime event.
+ *
+ * Roles: a viewer sees everything but no action button, and a closed session is
+ * read-only for everybody. That is presentation — RLS and the triggers are what
+ * actually enforce it (CLAUDE.md).
+ */
+
+/** A buy-in that is on screen but not confirmed by the server yet. */
+type PendingBuyIn = {
+  tempId: string;
+  playerId: string;
+  amountCents: number;
+  payment: PaymentMethod;
+  createdAt: string;
+  /** Id assigned by the database once the action returned. */
+  realId: string | null;
+};
+
+/** How long a confirmed optimistic row is kept before it is forgotten. */
+const DROP_PENDING_MS = 4000;
+
+type SheetState =
+  | { kind: 'none' }
+  | { kind: 'actions'; playerId: string }
+  | { kind: 'buyIn'; playerId: string }
+  | { kind: 'cashOut'; playerId: string }
+  | { kind: 'editStack'; playerId: string }
+  | { kind: 'payout'; playerId: string }
+  | { kind: 'addParticipant' }
+  | { kind: 'confirmRemove'; playerId: string }
+  | { kind: 'confirmDeleteEntry'; entry: SessionEntry };
+
+export function SessionDetailClient({
+  detail,
+  allPlayers,
+  canEdit,
+}: {
+  detail: SessionDetail;
+  /** Every player, for the „Teilnehmer hinzufügen“ sheet. */
+  allPlayers: PlayerListItem[];
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const { showSuccess, showError } = useToast();
+  const [pending, setPending] = useState<PendingBuyIn[]>([]);
+  const [sheet, setSheet] = useState<SheetState>({ kind: 'none' });
+
+  const { session, participants, entries, quickAmountsCents } = detail;
+  const isOpen = session.status === 'open';
+  const mayAct = canEdit && isOpen;
+
+  const refresh = useCallback(() => router.refresh(), [router]);
+  const realtimeStatus = useSessionRealtime(session.id, refresh);
+
+  // Timers that drop a confirmed optimistic row; cleared on unmount so no
+  // state is written into a component that is gone.
+  const dropTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    const timers = dropTimers.current;
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
+  }, []);
+
+  // A pending buy-in that the server data already contains is dropped right
+  // here, so it can never be counted twice for one render.
+  const visiblePending = useMemo(() => {
+    const known = new Set(entries.map((entry) => entry.id));
+    return pending.filter((item) => item.realId === null || !known.has(item.realId));
+  }, [entries, pending]);
+
+  const mergedEntries = useMemo<SessionEntry[]>(
+    () => [...entries, ...visiblePending.map(toEntry)],
+    [entries, visiblePending],
+  );
+
+  const { participants: derived, totals } = useMemo(
+    () => deriveSession(participants, mergedEntries),
+    [participants, mergedEntries],
+  );
+
+  const history = useMemo(() => sortEntriesNewestFirst(mergedEntries), [mergedEntries]);
+
+  const nameFor = useCallback(
+    (playerId: string) =>
+      participants.find((participant) => participant.playerId === playerId)?.name ?? 'Unbekannt',
+    [participants],
+  );
+
+  const participantIds = new Set(participants.map((participant) => participant.playerId));
+  const addablePlayers = allPlayers.filter((player) => !participantIds.has(player.id));
+
+  const selected = selectedParticipant(derived, sheet);
+  const closeSheet = useCallback(() => setSheet({ kind: 'none' }), []);
+
+  /** Runs an action, shows its German error and refreshes on success. */
+  async function run<T>(
+    action: () => Promise<ActionResult<T>>,
+    success?: string,
+  ): Promise<boolean> {
+    const result = await action();
+    if (!result.ok) {
+      showError(result.error.message);
+      return false;
+    }
+    if (success !== undefined) showSuccess(success);
+    refresh();
+    return true;
+  }
+
+  /**
+   * Buy-in is the only optimistic action (WP5, step 5): it is the frequent one
+   * at the table. The card updates immediately; on failure the pending row is
+   * removed again and the toast explains why.
+   */
+  async function submitBuyIn(
+    participant: DerivedParticipant,
+    amountCents: number,
+    payment: PaymentMethod,
+  ): Promise<boolean> {
+    const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setPending((current) => [
+      ...current,
+      {
+        tempId,
+        playerId: participant.playerId,
+        amountCents,
+        payment,
+        createdAt: new Date().toISOString(),
+        realId: null,
+      },
+    ]);
+
+    const result = await addBuyIn({
+      sessionId: session.id,
+      playerId: participant.playerId,
+      amountCents,
+      payment,
+    });
+
+    if (!result.ok) {
+      setPending((current) => current.filter((item) => item.tempId !== tempId));
+      showError(result.error.message);
+      return false;
+    }
+
+    const realId = result.data.id;
+    setPending((current) =>
+      current.map((item) => (item.tempId === tempId ? { ...item, realId } : item)),
+    );
+    // The row is hidden as soon as the refreshed server data contains `realId`
+    // (see `visiblePending`); this timer only clears the bookkeeping entry.
+    dropTimers.current.push(
+      setTimeout(() => {
+        setPending((current) => current.filter((item) => item.tempId !== tempId));
+      }, DROP_PENDING_MS),
+    );
+    showSuccess(buyInToast(amountCents, payment, participant.name));
+    refresh();
+    return true;
+  }
+
+  return (
+    <section className="flex flex-col gap-5">
+      <header className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">{formatPlayedOn(session.playedOn)}</h1>
+          <SessionStatusBadge status={session.status} />
+        </div>
+        {session.name ? <p className="text-sm opacity-80">{session.name}</p> : null}
+        {isOpen ? null : <ClosedNotice detail={detail} />}
+        <RealtimeNotice status={realtimeStatus} onReload={refresh} />
+      </header>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Tile label="Buy-ins gesamt" value={formatCents(totals.totalBuyIn)} />
+        <Tile
+          label="davon bar / Liste"
+          value={`${formatCents(totals.totalCash)} / ${formatCents(totals.totalCredit)}`}
+        />
+        <Tile label="Kasse aktuell" value={formatCents(totals.cashBox)} />
+        <Tile
+          label="Stacks gezählt"
+          value={`${totals.stackCount} von ${totals.participantCount}`}
+          hint={
+            totals.canClose
+              ? `Differenz ${formatSignedCents(totals.discrepancy)}`
+              : `${totals.openParticipants} spielen noch`
+          }
+        />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold">Teilnehmer</h2>
+          {mayAct ? (
+            <Button variant="secondary" onClick={() => setSheet({ kind: 'addParticipant' })}>
+              Teilnehmer hinzufügen
+            </Button>
+          ) : null}
+        </div>
+
+        {derived.length === 0 ? (
+          <EmptyState
+            title="Noch keine Teilnehmer."
+            description={
+              mayAct
+                ? 'Füge die Spieler hinzu, die heute am Tisch sitzen.'
+                : 'Ein Bearbeiter kann Spieler hinzufügen.'
+            }
+          />
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {derived.map((participant) => (
+              <li key={participant.playerId}>
+                <ParticipantCard
+                  participant={participant}
+                  interactive={mayAct}
+                  pendingBuyIns={
+                    visiblePending.filter((item) => item.playerId === participant.playerId).length
+                  }
+                  onPrimary={() =>
+                    setSheet(
+                      participant.stack === null
+                        ? { kind: 'buyIn', playerId: participant.playerId }
+                        : { kind: 'actions', playerId: participant.playerId },
+                    )
+                  }
+                  onMenu={() => setSheet({ kind: 'actions', playerId: participant.playerId })}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <h2 className="text-base font-semibold">Verlauf</h2>
+        <HistoryList
+          entries={history}
+          nameFor={nameFor}
+          canEdit={mayAct}
+          onDelete={(entry) => setSheet({ kind: 'confirmDeleteEntry', entry })}
+        />
+      </div>
+
+      {sheet.kind === 'actions' && selected !== null ? (
+        <ParticipantActionsSheet
+          participant={selected}
+          onBuyIn={() => setSheet({ kind: 'buyIn', playerId: selected.playerId })}
+          onCashOut={() => setSheet({ kind: 'cashOut', playerId: selected.playerId })}
+          onEditStack={() => setSheet({ kind: 'editStack', playerId: selected.playerId })}
+          onPayout={() => setSheet({ kind: 'payout', playerId: selected.playerId })}
+          onRemove={() => setSheet({ kind: 'confirmRemove', playerId: selected.playerId })}
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'buyIn' && selected !== null ? (
+        <BuyInSheet
+          participant={selected}
+          quickAmountsCents={quickAmountsCents}
+          onSubmit={(amountCents, payment) => submitBuyIn(selected, amountCents, payment)}
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'cashOut' && selected !== null ? (
+        <CashOutSheet
+          participant={selected}
+          mode="create"
+          onSubmit={(amountCents) =>
+            run(
+              () =>
+                addCashOut({
+                  sessionId: session.id,
+                  playerId: selected.playerId,
+                  amountCents,
+                }),
+              `Stack ${formatCents(amountCents)} für ${selected.name} eingetragen`,
+            )
+          }
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'editStack' && selected !== null ? (
+        <CashOutSheet
+          participant={selected}
+          mode="edit"
+          onSubmit={(amountCents) => {
+            const cashOutId = cashOutEntryId(entries, selected.playerId);
+            if (cashOutId === null) {
+              showError('Für diesen Spieler gibt es keinen Stack mehr.');
+              return Promise.resolve(false);
+            }
+            return run(
+              () => updateCashOut({ id: cashOutId, sessionId: session.id, amountCents }),
+              `Stack von ${selected.name} auf ${formatCents(amountCents)} geändert`,
+            );
+          }}
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'payout' && selected !== null ? (
+        <PayoutSheet
+          participant={selected}
+          cashBoxCents={totals.cashBox}
+          preview={previewCashEntitlement(derived, selected.playerId)}
+          onSubmit={(amountCents) =>
+            run(
+              () =>
+                addPayout({
+                  sessionId: session.id,
+                  playerId: selected.playerId,
+                  amountCents,
+                }),
+              `${formatCents(amountCents)} bar an ${selected.name} ausgezahlt`,
+            )
+          }
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'addParticipant' ? (
+        <AddParticipantSheet
+          players={addablePlayers}
+          onAddExisting={(playerId) =>
+            run(() => addParticipant({ sessionId: session.id, playerId }), 'Teilnehmer hinzugefügt')
+          }
+          onAddNew={(name) =>
+            run(
+              () => addParticipantByNewPlayer({ sessionId: session.id, name }),
+              'Spieler angelegt und hinzugefügt',
+            )
+          }
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'confirmRemove' && selected !== null ? (
+        <ConfirmDeleteSheet
+          title={`${selected.name} entfernen?`}
+          description="Der Spieler wird nur aus dieser Session entfernt. Er bleibt in der Spielerliste."
+          onConfirm={() =>
+            run(
+              () => removeParticipant({ sessionId: session.id, playerId: selected.playerId }),
+              'Teilnehmer entfernt',
+            )
+          }
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'confirmDeleteEntry' ? (
+        <ConfirmDeleteSheet
+          title="Eintrag löschen?"
+          description={`${nameFor(sheet.entry.playerId)} · ${describeEntry(sheet.entry)}. Der Eintrag bleibt im Audit-Log sichtbar.`}
+          onConfirm={() =>
+            run(
+              () => deleteEntry({ id: sheet.entry.id, sessionId: session.id }),
+              'Eintrag gelöscht',
+            )
+          }
+          onClose={closeSheet}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <Card className="flex flex-col gap-0.5 px-4 py-3">
+      <span className="text-xs opacity-60">{label}</span>
+      <span className="text-base font-semibold tabular-nums">{value}</span>
+      {hint ? <span className="text-xs opacity-60">{hint}</span> : null}
+    </Card>
+  );
+}
+
+/** Head of a closed session; the frozen settlement itself follows in WP6. */
+function ClosedNotice({ detail }: { detail: SessionDetail }) {
+  const { session } = detail;
+
+  return (
+    <div className="flex flex-col gap-1 rounded-2xl bg-black/5 px-4 py-3 text-sm dark:bg-white/10">
+      <span>
+        Abgeschlossen
+        {session.closedAt === null ? '' : ` am ${formatBerlinDateTime(session.closedAt)}`}
+        {session.closedByName === null ? '' : ` von ${session.closedByName}`}.
+      </span>
+      {session.discrepancyCents !== null && session.discrepancyCents !== 0 ? (
+        <span className="text-red-600 dark:text-red-400">
+          Differenz {formatSignedCents(session.discrepancyCents)}
+        </span>
+      ) : null}
+      {session.closeNote ? <span className="opacity-80">{session.closeNote}</span> : null}
+      <span className="opacity-70">
+        Nichts an dieser Session lässt sich noch ändern. Die gespeicherte Abrechnung erscheint mit
+        dem nächsten Arbeitspaket hier.
+      </span>
+    </div>
+  );
+}
+
+/** „Verbindung getrennt“ once the channel has been silent for 10 seconds. */
+function RealtimeNotice({
+  status,
+  onReload,
+}: {
+  status: 'connecting' | 'live' | 'disconnected';
+  onReload: () => void;
+}) {
+  if (status !== 'disconnected') return null;
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-amber-500/15 px-3 py-2 text-sm">
+      <span className="flex items-center gap-2">
+        <Badge tone="muted">Verbindung getrennt</Badge>
+        <span className="opacity-80">Neue Einträge kommen gerade nicht automatisch an.</span>
+      </span>
+      <Button variant="secondary" onClick={onReload}>
+        Neu laden
+      </Button>
+    </div>
+  );
+}
+
+/** The participant a sheet is about, or `null` if the sheet has none. */
+function selectedParticipant(
+  participants: readonly DerivedParticipant[],
+  sheet: SheetState,
+): DerivedParticipant | null {
+  if (!('playerId' in sheet)) return null;
+  return participants.find((participant) => participant.playerId === sheet.playerId) ?? null;
+}
+
+/** Id of the `cash_out` entry of a player, needed to change the stack. */
+function cashOutEntryId(entries: readonly SessionEntry[], playerId: string): string | null {
+  const found = entries.find((entry) => entry.type === 'cash_out' && entry.playerId === playerId);
+  return found?.id ?? null;
+}
+
+/** A pending buy-in rendered like a real entry until the server confirms it. */
+function toEntry(item: PendingBuyIn): SessionEntry {
+  return {
+    id: item.realId ?? item.tempId,
+    playerId: item.playerId,
+    type: 'buy_in',
+    amountCents: item.amountCents,
+    payment: item.payment,
+    createdAt: item.createdAt,
+    createdByName: null,
+  };
+}

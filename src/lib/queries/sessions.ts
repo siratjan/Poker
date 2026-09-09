@@ -47,34 +47,6 @@ export async function listSessions(): Promise<SessionListItem[]> {
   }));
 }
 
-export type SessionHeader = {
-  id: string;
-  playedOn: string;
-  name: string | null;
-  status: Enums<'session_status'>;
-  closedAt: string | null;
-};
-
-/** The header of one session (WP4 detail page is header-only; WP5 fills it). */
-export async function getSessionHeader(id: string): Promise<SessionHeader | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('id, played_on, name, status, closed_at')
-    .eq('id', id)
-    .maybeSingle();
-
-  if (error !== null) {
-    console.error('[queries] getSessionHeader:', error.message);
-    return null;
-  }
-  if (data === null) return null;
-
-  return {
-    id: data.id,
-    playedOn: data.played_on,
-    name: data.name,
-    status: data.status,
-    closedAt: data.closed_at,
-  };
-}
+// The header-only reader of WP4 was replaced in WP5 by
+// `src/lib/queries/sessionDetail.ts`, which loads the whole detail screen and
+// distinguishes „not found“ from „could not be loaded“ (Gaby WP4, F1/F2).
