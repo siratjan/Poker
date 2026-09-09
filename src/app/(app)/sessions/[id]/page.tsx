@@ -36,12 +36,16 @@ export default async function SessionDetailPage({ params }: PageProps<'/sessions
 
   const mayEdit = canEdit(user.role);
   // The player list is only needed for the „Teilnehmer hinzufügen“ sheet.
-  const allPlayers = mayEdit && result.data.session.status === 'open' ? await listPlayers() : [];
+  const playersResult =
+    mayEdit && result.data.session.status === 'open' ? await listPlayers() : null;
 
   return (
     <SessionDetailClient
       detail={result.data}
-      allPlayers={allPlayers}
+      allPlayers={playersResult !== null && playersResult.ok ? playersResult.data : []}
+      // „Liste leer“ and „Liste kaputt“ must not read the same in the sheet
+      // (Gaby WP5, F6).
+      playersLoadFailed={playersResult !== null && !playersResult.ok}
       canEdit={mayEdit}
       isAdmin={isAdmin(user.role)}
     />

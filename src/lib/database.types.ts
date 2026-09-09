@@ -545,6 +545,31 @@ export type Database = {
           },
         ];
       };
+      // Read view for the player overview (supabase/migrations/0007_player_stats.sql).
+      // security_invoker, so the querying user's RLS applies. Read-only.
+      player_stats: {
+        Row: {
+          player_id: string;
+          name: string;
+          name_normalized: string;
+          sessions_played: number;
+          total_buy_in_cents: number;
+          total_stack_cents: number;
+          net_cents: number;
+          /** `null` for a player who has never been added to a session. */
+          last_played_on: string | null;
+          open_sessions: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'players_id_fkey';
+            columns: ['player_id'];
+            isOneToOne: true;
+            referencedRelation: 'players';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
     Functions: {
       close_session: {
