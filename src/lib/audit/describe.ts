@@ -325,6 +325,9 @@ function describeSetting(entry: AuditEntry): string {
   const key = text(data, 'key') ?? entry.rowId;
 
   if (entry.action === 'DELETE') return `hat die Einstellung „${key}“ gelöscht`;
+  // Like every other table: an action this version does not know gets the
+  // generic sentence instead of a claim about what happened (Gaby WP8-F3).
+  if (entry.action !== 'INSERT' && entry.action !== 'UPDATE') return generic(entry);
 
   if (key === 'quick_amounts_cents') {
     const amounts = centsList(valueOf(data));

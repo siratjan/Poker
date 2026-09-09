@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { auditCursorFilter, isAfterCursor, type AuditCursor } from './cursor';
+import {
+  auditCursorFilter,
+  isAfterCursor,
+  isAuditCursorTimestamp,
+  type AuditCursor,
+} from './cursor';
 
 const CURSOR: AuditCursor = { at: '2026-09-12T19:14:00.123456+00:00', id: 4711 };
 
@@ -15,6 +20,40 @@ describe('auditCursorFilter', () => {
     const filter = auditCursorFilter(CURSOR);
     const outside = filter.replace(/and\([^)]*\)/, '');
     expect(outside.split(',').filter((part) => part !== '')).toHaveLength(1);
+  });
+});
+
+describe('isAuditCursorTimestamp', () => {
+  it('accepts the timestamps Postgres actually returns', () => {
+    for (const value of [
+      '2026-09-12T19:14:00.123456+00:00',
+      '2026-09-12T19:00:00+00:00',
+      '2026-09-12T19:00:00Z',
+      '2026-09-12T19:00:00.5+02:00',
+      '2026-09-12T19:00:00+0200',
+    ]) {
+      expect(isAuditCursorTimestamp(value)).toBe(true);
+    }
+  });
+
+  it('rejects everything that could smuggle a condition into the or(…) filter', () => {
+    for (const value of [
+      '2026-01-01,id.gte.0',
+      '2026-09-12T19:00:00+00:00,id.gte.0',
+      '2026-09-12T19:00:00+00:00)or(true',
+      'at.lt.2026-09-12',
+      'abc',
+      '',
+      '2026-09-12',
+      '2026-09-12T19:00:00',
+      '2026-09-12T19:00:00-03',
+      '2026-13-45T99:99:99+00:00',
+      ' 2026-09-12T19:00:00+00:00',
+      '2026-09-12T19:00:00+00:00 ',
+      '2026-09-12T19:00:00+00:00\n2026-09-12T19:00:00+00:00',
+    ]) {
+      expect(isAuditCursorTimestamp(value)).toBe(false);
+    }
   });
 });
 

@@ -15,8 +15,30 @@ export type AuditCursor = {
 };
 
 /**
+ * An ISO timestamp with an offset, as Postgres serialises `timestamptz`:
+ * `2026-09-12T18:00:00+00:00`, with optional fractional seconds and `Z`,
+ * `+HHMM` or `+HH:MM` as the offset (an hour-only offset is neither emitted by
+ * Postgres nor accepted by `Date.parse`, so it is rejected as well).
+ *
+ * `at` goes verbatim into the PostgREST `or(…)` expression below, so nothing
+ * unchecked may reach it: a value like `2026-01-01,id.gte.0` would smuggle an
+ * extra condition into that expression (Gaby WP8-F2). `auditPageSchema`
+ * (src/lib/validation/audit.ts) rejects everything this pattern does not match.
+ */
+const AUDIT_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:?\d{2})$/;
+
+/** `true` if `value` is an ISO timestamp safe to put into the cursor filter. */
+export function isAuditCursorTimestamp(value: string): boolean {
+  return AUDIT_TIMESTAMP.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/**
  * PostgREST `or=(…)` filter for „strictly after this cursor“: an older
  * timestamp, or the same timestamp with a smaller id.
+ *
+ * Both parts are validated before they get here: `at` by
+ * `isAuditCursorTimestamp`, `id` as a non-negative integer.
  */
 export function auditCursorFilter(cursor: AuditCursor): string {
   return `at.lt.${cursor.at},and(at.eq.${cursor.at},id.lt.${cursor.id})`;

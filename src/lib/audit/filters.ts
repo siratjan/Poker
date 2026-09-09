@@ -54,6 +54,20 @@ export function auditFiltersToQuery(filters: AuditFilters): string {
   return query === '' ? '' : `?${query}`;
 }
 
+/**
+ * React key for the log list.
+ *
+ * A filter change keeps the route `/log` and only swaps the query string, so
+ * React would keep the client component mounted: it would take the new
+ * `filters` prop (the dropdown jumps) but hold on to the `entries` and
+ * `cursor` state of the *previous* filter, and „Mehr laden“ would then send an
+ * old cursor with new filters. Keying the list on the active filters forces a
+ * remount, so every filter change starts from the server-rendered first page.
+ */
+export function auditListKey(filters: AuditFilters): string {
+  return `log${auditFiltersToQuery(filters)}`;
+}
+
 /** `/log?session=…` — the „Log dieser Session“ link of the session detail page. */
 export function sessionLogHref(sessionId: string): string {
   return `/log${auditFiltersToQuery({ ...NO_AUDIT_FILTERS, sessionId })}`;

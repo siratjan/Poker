@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isAuditCursorTimestamp } from '@/lib/audit/cursor';
 import { AUDITED_TABLES } from '@/lib/audit/describe';
 
 /**
@@ -23,7 +24,14 @@ export const auditPageSchema = z.object({
     .default({ sessionId: null, userId: null, tableName: null }),
   cursor: z
     .object({
-      at: z.string().min(1).max(64),
+      // `at` is put verbatim into the PostgREST `or(…)` expression of
+      // `auditCursorFilter`, so it has to be a real ISO timestamp — a value
+      // like `2026-01-01,id.gte.0` would otherwise add its own condition
+      // there (Gaby WP8-F2). `id` stays a number: `audit_log.id` is a bigint.
+      at: z
+        .string()
+        .max(64)
+        .refine(isAuditCursorTimestamp, { message: 'Ungültiger Cursor.' }),
       id: z.number().int().nonnegative(),
     })
     .nullish()

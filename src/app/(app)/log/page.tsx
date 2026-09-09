@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { AuditLogList } from '@/components/audit/AuditLogList';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { loginPathFor } from '@/lib/auth/paths';
-import { parseAuditFilters } from '@/lib/audit/filters';
+import { auditListKey, parseAuditFilters } from '@/lib/audit/filters';
 import { getAuditFilterOptions, getAuditPage } from '@/lib/queries/auditLog';
 
 /**
@@ -31,6 +31,9 @@ export default async function LogPage({ searchParams }: PageProps<'/log'>) {
 
       {page.ok ? (
         <AuditLogList
+          // Remount on every filter change: otherwise the list keeps the
+          // entries and the cursor of the previous filter (Gaby WP8-F1).
+          key={auditListKey(filters)}
           initialEntries={page.data.entries}
           initialNames={page.data.names}
           initialCursor={page.data.nextCursor}
