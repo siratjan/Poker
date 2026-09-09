@@ -206,3 +206,97 @@ bis „wird gespeichert …“ verschwunden ist).
   („Ali · Buy-in 100 € · gelöscht von …“); heute sind sie nur im Log sichtbar.
 - Ein „Alle ausgestiegen“-Fortschritt im Kopf (x von n) ist da; der Abschluss-Bereich
   darunter gehört bewusst zu WP6.
+
+## Nacharbeit Runde 3 (Planer-Blocker Realtime)
+
+**Befund:** Ein zweiter Tab bekam keine Events, meldete aber `SUBSCRIBED` und keinen
+Fehler. Die Ursache liegt im Client, nicht in der Publication.
+
+**Belegte Ursache – Wettlauf zwischen Token und Join.** `RealtimeChannel.subscribe()`
+ist synchron und baut die Join-Payload aus dem, was der Socket in genau diesem Moment
+hält (`node_modules/@supabase/realtime-js/dist/module/RealtimeChannel.js`, in
+`subscribe()`):
+
+```js
+const accessTokenPayload = {};
+...
+if (this.socket.accessTokenValue) {
+    accessTokenPayload.access_token = this.socket.accessTokenValue;
+}
+...
+this.updateJoinPayload(Object.assign({ config }, accessTokenPayload));
+```
+
+Dort wird nichts abgewartet. Gefüllt wird `accessTokenValue` aber erst asynchron:
+supabase-js hängt sich mit `_listenForAuthEvents()` an `onAuthStateChange` und ruft in
+`_handleTokenChanged` (`node_modules/@supabase/supabase-js/dist/index.mjs`):
+
+```js
+if ((event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "INITIAL_SESSION") && this.changedAccessToken !== token) {
+    this.changedAccessToken = token;
+    this.realtime.setAuth(token);
+}
+```
+
+`INITIAL_SESSION` kommt erst, nachdem `@supabase/ssr` das Auth-Cookie gelesen hat –
+also nach unserem `useEffect`. Auch der Fallback in `RealtimeClient.connect()` hilft
+nicht, er ist selbst asynchron und wird nur abgeschickt, nicht abgewartet:
+
+```js
+// while avoiding race conditions with SupabaseClient's immediate setAuth call
+if (this.accessToken && !this._authPromise) {
+    this._setAuthSafely('connect');
+}
+```
+
+Der Join ging deshalb **ohne** `access_token` raus. Realtime fällt dann auf den
+`apikey`-Parameter des Sockets zurück, das ist der Publishable Key → Rolle `anon`.
+Unsere Policies sind `for select to authenticated using (true)`, `anon` trifft also
+keine Zeile. Der Server bestätigt den Join trotzdem samt `postgres_changes`-Bindings,
+darum meldet der Kanal `SUBSCRIBED` und es erscheint nie ein Fehler – es kommt nur
+nichts an. Das spätere `setAuth` repariert das nicht: `_performAuth`
+(`RealtimeClient.js`) schickt das neue Token nur an bereits gejointe Kanäle
+(`if (channel.joinedOnce && channel.channelAdapter.isJoined())`); wer den Wettlauf
+verloren hat, ist zu diesem Zeitpunkt noch nicht gejoint und bekommt nur eine
+`updateJoinPayload` für einen Rejoin, der nie kommt.
+
+Hypothesen 3 und 4 des Planers sind nicht die Ursache: die drei `.on()`-Filter werden
+in `_updatePostgresBindings` positionsgleich mit der Serverantwort abgeglichen (bei
+Abweichung gäbe es `CHANNEL_ERROR`, den gab es laut Beobachtung nicht), und
+`private: true` betrifft Broadcast/Presence, nicht `postgres_changes`.
+
+**Fix** (`src/components/sessions/useSessionRealtime.ts`): `subscribeToSession` holt vor
+jedem Join erst die Session und setzt das Token auf den Socket; erst danach wird der
+Kanal gebaut und gejoint (`authenticateThen` → `openChannel`). Der Retry nach
+`CHANNEL_ERROR`/`TIMED_OUT` läuft durch denselben Pfad, authentifiziert sich also
+erneut. Ohne Session wird `setAuth()` ohne Argument gerufen, damit der
+`accessToken`-Callback von supabase-js die Quelle der Wahrheit bleibt; genau darum
+bleibt auch bei `setAuth(token)` `TOKEN_REFRESHED` Sache von supabase-js
+(`_performAuth`: `if (this.accessToken) this._manuallySetToken = false`). Schlägt das
+Lesen der Session fehl, wird geloggt und trotzdem gejoint (dann greift der alte,
+schlechtere Pfad – immer noch besser als gar kein Kanal). Wird während des Wartens
+abgeräumt, öffnet sich kein Kanal mehr. Die Begründung der Reihenfolge steht als
+Kommentar über `authenticateThen`. `src/lib/supabase/client.ts` blieb unverändert.
+
+**Tests:** `useSessionRealtime.test.ts` von 9 auf 15 Fälle. Der Fake-Client hat jetzt
+`auth.getSession` + `realtime.setAuth` und protokolliert die Reihenfolge. Neu: Join
+erst nach `setAuth` (`['getSession','setAuth:jwt-user','channel','subscribe']`), gar
+kein Join solange die Session noch gelesen wird, kein Join nach Teardown während des
+Wartens, Fallback auf den Callback ohne Session, Join trotz Fehler beim Session-Lesen,
+und Re-Authentifizierung vor dem Retry. Kein `.from(`/`.rpc(` in Client-Dateien,
+`tests/gaby/**` unverändert.
+
+**Prüfung Runde 3:** `npm run check` grün – 32 Dateien, 676 Tests. `npm run build` grün.
+
+**Hinweis zur Umgebung (kein Code-Problem):** Im Worktree gilt `core.autocrlf=true`,
+dadurch lagen die Dateien unter `supabase/migrations/` mit CRLF im Arbeitsbaum und drei
+Fälle in `tests/gaby/wp1-schema.gaby.test.ts` schlugen fehl, weil sie SQL-Blöcke mit
+`\n` wörtlich vergleichen. Nach einem Checkout mit LF sind sie grün; der Index enthält
+ohnehin LF, am Commit ändert das nichts. Falls das öfter stört, wäre ein
+`.gitattributes` mit `*.sql text eol=lf` die Lösung – das gehört aber nicht in dieses
+Paket.
+
+**Was der Planer im Browser prüfen sollte:** Zwei Tabs auf derselben Session-Detailseite,
+in Tab 1 einen Buy-in oder Cash-out eintragen – Tab 2 muss die Änderung ohne Neuladen
+innerhalb von 2 s zeigen. Danach derselbe Test mit einem Tab, der schon vor dem Login
+offen war, um den Pfad „Session kommt erst später“ abzudecken.
