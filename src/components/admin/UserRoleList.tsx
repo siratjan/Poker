@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { setUserRole } from '@/actions/admin';
+import { useWritesBlocked } from '@/components/app/ConnectionProvider';
 import { Card } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/Toast';
 import { isRole, ROLE_LABELS, ROLES, type Role } from '@/lib/auth/roles';
@@ -39,8 +40,10 @@ function UserRow({ user }: { user: AdminUser }) {
   const { showSuccess, showError } = useToast();
   const [role, setRole] = useState<Role>(user.role);
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   async function onChange(next: Role) {
+    if (offline) return;
     const previous = role;
     setRole(next);
     setPending(true);
@@ -76,7 +79,7 @@ function UserRow({ user }: { user: AdminUser }) {
       <select
         id={`role-${user.id}`}
         value={role}
-        disabled={pending}
+        disabled={pending || offline}
         onChange={(event) => {
           const value = event.target.value;
           if (isRole(value)) void onChange(value);

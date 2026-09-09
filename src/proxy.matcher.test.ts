@@ -40,8 +40,16 @@ describe('src/proxy.ts', () => {
   it.each([
     '/_next/static/chunks/main.js',
     '/_next/image?url=%2Ficon.png',
+    // WP9: `_next/` as a whole, not only `static` and `image` (Gaby WP2-F1).
+    '/_next/webpack-hmr',
+    '/_next/turbopack-hmr',
     '/favicon.ico',
     '/manifest.webmanifest',
+    // The PWA icons: an anonymous installability check has to reach them.
+    '/icons/icon-192.png',
+    '/icons/icon-512.png',
+    '/icons/icon-maskable-512.png',
+    '/icons/apple-touch-icon.png',
     '/robots.txt',
     '/sitemap.xml',
     '/icons/icon-192.png',

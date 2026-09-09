@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "check": "npm run typecheck && npm run lint && npm run test",
     "rls:smoke": "tsx scripts/rls-smoke.ts",
+    "icons:generate": "node scripts/generate-icons.mjs",
     "types:gen": "supabase gen types typescript --linked > src/lib/database.types.ts"
   },
   "dependencies": {

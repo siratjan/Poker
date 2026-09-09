@@ -30,7 +30,13 @@ export function TabBar({ showAdmin }: { showAdmin: boolean }) {
     <nav
       aria-label="Hauptnavigation"
       className="fixed inset-x-0 bottom-0 z-20 border-t border-black/10 bg-[var(--background)]/95 backdrop-blur dark:border-white/10"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      // Safe-area insets on all three edges (WP9, step 5): the home indicator
+      // at the bottom, and the rounded corners in landscape on the sides.
+      style={{
+        paddingBottom: 'var(--safe-bottom)',
+        paddingLeft: 'var(--safe-left)',
+        paddingRight: 'var(--safe-right)',
+      }}
     >
       <ul className="mx-auto flex max-w-2xl">
         {tabs.map((tab) => {
@@ -40,8 +46,10 @@ export function TabBar({ showAdmin }: { showAdmin: boolean }) {
               <Link
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
-                className={`flex min-h-[56px] flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium transition ${
-                  active ? 'text-emerald-600 dark:text-emerald-400' : 'opacity-60'
+                // emerald-700 rather than emerald-600 in light mode: 5.55:1 on
+                // white against 3.77:1, which would fail WCAG AA (WP9, step 4).
+                className={`flex min-h-[var(--tabbar-height)] flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium transition ${
+                  active ? 'text-emerald-700 dark:text-emerald-400' : 'opacity-70'
                 }`}
               >
                 <TabIcon name={tab.icon} />

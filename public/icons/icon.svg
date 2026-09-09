@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Poker-Kasse</title>
+  <rect width="512" height="512" fill="rgb(4,120,87)" />
+  <circle cx="256" cy="256" r="194.6" fill="rgb(255,255,255)" />
+  <circle cx="256" cy="256" r="153.6" fill="rgb(4,120,87)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(0 256 256)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(45 256 256)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(90 256 256)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(135 256 256)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(180 256 256)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(225 256 256)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(270 256 256)" />
+    <rect x="217.1" y="61.4" width="77.8" height="41.0" fill="rgb(4,120,87)" transform="rotate(315 256 256)" />
+  <circle cx="256" cy="256" r="97.3" fill="rgb(255,255,255)" />
+  <circle cx="256" cy="256" r="43.5" fill="rgb(4,78,56)" />
+</svg>

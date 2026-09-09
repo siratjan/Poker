@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { setQuickAmounts } from '@/actions/admin';
+import { useWritesBlocked } from '@/components/app/ConnectionProvider';
+import { OfflineNote } from '@/components/app/OfflineNote';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/Toast';
@@ -26,6 +28,7 @@ export function QuickAmountsEditor({ amountsCents }: { amountsCents: number[] })
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   const sorted = [...amounts].sort((a, b) => a - b);
   const changed = !sameAmounts(sorted, [...amountsCents].sort((a, b) => a - b));
@@ -60,6 +63,7 @@ export function QuickAmountsEditor({ amountsCents }: { amountsCents: number[] })
   }
 
   async function save() {
+    if (offline) return;
     setPending(true);
     setError(null);
 
@@ -133,7 +137,7 @@ export function QuickAmountsEditor({ amountsCents }: { amountsCents: number[] })
             <span
               key={cents}
               aria-hidden="true"
-              className="flex min-h-[56px] items-center justify-center rounded-xl border border-black/15 text-base font-semibold dark:border-white/20"
+              className="flex min-h-[56px] items-center justify-center rounded-xl border border-black/15 text-base font-semibold tabular-nums dark:border-white/20"
             >
               {formatCents(cents)}
             </span>
@@ -141,9 +145,10 @@ export function QuickAmountsEditor({ amountsCents }: { amountsCents: number[] })
         </div>
       </div>
 
-      <Button onClick={save} disabled={pending || !changed}>
+      <Button onClick={save} disabled={pending || offline || !changed}>
         {pending ? 'Speichert …' : 'Speichern'}
       </Button>
+      <OfflineNote />
     </div>
   );
 }

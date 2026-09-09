@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { reopenSession } from '@/actions/close';
+import { useWritesBlocked } from '@/components/app/ConnectionProvider';
+import { OfflineNote } from '@/components/app/OfflineNote';
 import { CopySettlementButton } from '@/components/settlement/CopySettlementButton';
 import { SettlementView } from '@/components/settlement/SettlementView';
 import { Button } from '@/components/ui/Button';
@@ -89,11 +91,12 @@ function ReopenSheet({
   const { showError, showSuccess } = useToast();
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
 
   const usable = reason.trim().length >= MIN_NOTE_LENGTH;
 
   async function submit() {
-    if (!usable || pending) return;
+    if (!usable || pending || offline) return;
     setPending(true);
     const result = await reopenSession({ sessionId, reason: reason.trim() });
     setPending(false);
@@ -128,12 +131,18 @@ function ReopenSheet({
           placeholder="Warum wird wieder geöffnet?"
           className="w-full rounded-xl border border-black/15 bg-transparent p-3 text-base outline-none focus:border-emerald-500 dark:border-white/20"
         />
-        <Button size="lg" variant="danger" disabled={!usable || pending} onClick={() => void submit()}>
+        <Button
+          size="lg"
+          variant="danger"
+          disabled={!usable || pending || offline}
+          onClick={() => void submit()}
+        >
           {pending ? 'Öffnet …' : 'Wieder öffnen'}
         </Button>
         <Button size="lg" variant="secondary" onClick={onClose}>
           Abbrechen
         </Button>
+        <OfflineNote />
       </div>
     </Sheet>
   );

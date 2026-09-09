@@ -66,7 +66,9 @@ export default async function SessionsPage() {
       {mayEdit && sessions.length > 0 ? (
         <div
           className="fixed inset-x-0 bottom-0 z-30 px-4"
-          style={{ paddingBottom: 'calc(72px + env(safe-area-inset-bottom))' }}
+          // Sits above the tab bar, both of them above the home indicator
+          // (WP9, step 5).
+          style={{ paddingBottom: 'calc(var(--tabbar-height) + var(--safe-bottom) + 1rem)' }}
         >
           <div className="mx-auto max-w-2xl">
             <Link
@@ -93,7 +95,7 @@ function SessionCard({ session }: { session: SessionListItem }) {
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="text-sm font-semibold">{formatPlayedOn(session.playedOn)}</span>
           {session.name ? <span className="truncate text-sm opacity-80">{session.name}</span> : null}
-          <span className="text-xs opacity-60">
+          <span className="text-xs tabular-nums opacity-70">
             {participants} · {buyIns}
           </span>
         </div>
