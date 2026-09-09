@@ -18,7 +18,10 @@ import { createClient } from '@/lib/supabase/client';
  *   depends on the id alone; `onChange` is kept in a ref),
  * - the channel is removed on unmount and whenever the id changes,
  * - one automatic reconnect after a `CHANNEL_ERROR` / `TIMED_OUT`,
- * - status `disconnected` if the channel is not live again after 10 seconds.
+ * - status `disconnected` if the channel is not live again after 10 seconds,
+ * - the user JWT reaches the socket *before* the channel joins (see
+ *   `authenticateThen` — without it the channel joins as `anon` and silently
+ *   never delivers a row).
  */
 
 export type RealtimeStatus = 'connecting' | 'live' | 'disconnected';
@@ -65,6 +68,14 @@ export type ChannelLike<C> = {
 export type RealtimeClientLike<C> = {
   channel: (name: string) => C;
   removeChannel: (channel: C) => unknown;
+  /** Read-only: the current session, only for its access token. Never a query. */
+  auth: {
+    getSession: () => Promise<{ data: { session: { access_token: string } | null } }>;
+  };
+  /** `setAuth(token)` puts the JWT on the socket before the next channel joins. */
+  realtime: {
+    setAuth: (token?: string) => Promise<void>;
+  };
 };
 
 /** The three tables one session listens to, each filtered to that session. */
@@ -119,7 +130,47 @@ export function subscribeToSession<C extends ChannelLike<C>>(
     return open;
   }
 
-  function connect() {
+  /**
+   * Puts the user JWT on the socket, *then* joins. The order is the whole point
+   * (planner blocker WP5, round 3):
+   *
+   * `RealtimeChannel.subscribe()` is synchronous. It builds the join payload
+   * from whatever the socket holds at that very moment
+   * (`realtime-js/dist/module/RealtimeChannel.js`:
+   * `if (this.socket.accessTokenValue) accessTokenPayload.access_token = …`),
+   * and supabase-js only fills that value asynchronously — the `INITIAL_SESSION`
+   * event calls `realtime.setAuth(token)` (`supabase-js/dist/index.mjs`,
+   * `_handleTokenChanged`) after `auth.getSession()` has read the cookie. Joining
+   * on mount therefore usually wins the race and goes out *without* a token, so
+   * Realtime evaluates our `to authenticated` RLS policies as `anon`, matches no
+   * row, and delivers nothing — while still ACKing the join, which is why the
+   * channel reports `SUBSCRIBED` and no error is ever shown. The later
+   * `setAuth` does not repair it: `_performAuth` only pushes `access_token` to
+   * channels that are already joined, and a join that lost the race is not.
+   *
+   * Awaiting the session first and handing the token to `setAuth` closes that
+   * window. Passing a token keeps supabase-js's `accessToken` callback as the
+   * source of truth (`_performAuth`: `if (this.accessToken) this._manuallySetToken = false`),
+   * so `TOKEN_REFRESHED` stays supabase-js's job.
+   */
+  async function authenticateThen(open: () => void) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      await (token === undefined ? supabase.realtime.setAuth() : supabase.realtime.setAuth(token));
+    } catch (error) {
+      console.error('[realtime] could not set the access token before joining:', error);
+    }
+    if (cancelled) return;
+    try {
+      open();
+    } catch (error) {
+      console.error('[realtime] opening the channel failed:', error);
+    }
+  }
+
+  /** Builds the channel and joins. Only ever called from `authenticateThen`. */
+  function openChannel() {
     const next = supabase.channel(`session:${sessionId}`);
     for (const { table, filter } of watchedTables(sessionId)) {
       next.on('postgres_changes', { event: '*', schema: 'public', table, filter }, () => {
@@ -128,6 +179,10 @@ export function subscribeToSession<C extends ChannelLike<C>>(
     }
     active = next;
     next.subscribe(handleStatus);
+  }
+
+  function connect() {
+    void authenticateThen(openChannel);
   }
 
   function handleStatus(channelStatus: string) {
@@ -154,11 +209,8 @@ export function subscribeToSession<C extends ChannelLike<C>>(
         console.error('[realtime] removing the broken channel failed:', error);
       }
     }
-    try {
-      connect();
-    } catch (error) {
-      console.error('[realtime] reconnect failed:', error);
-    }
+    // Re-authenticates as well: the retry may happen after a token refresh.
+    connect();
   }
 
   connect();

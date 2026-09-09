@@ -7,12 +7,16 @@ import {
 } from '@/components/sessions/useSessionRealtime';
 
 /**
- * Channel lifecycle of the session realtime hook (Gaby WP5-F1).
+ * Channel lifecycle of the session realtime hook (Gaby WP5-F1, planner blocker
+ * round 3).
  *
- * `subscribeToSession` is the part without React, so a fake channel is enough:
+ * `subscribeToSession` is the part without React, so a fake client is enough:
  * no DOM, no Supabase. What is pinned here is the reconnect that the review
  * found broken — after `CHANNEL_ERROR` the old channel is removed and a *new*
- * one is opened *with* the status callback, exactly once.
+ * one is opened *with* the status callback, exactly once — and the join order
+ * the planner found broken: the access token has to be on the socket *before*
+ * the channel joins, otherwise Realtime evaluates RLS as `anon` and silently
+ * delivers nothing.
  */
 
 type Subscription = { table: string; filter: string; callback: () => void };
@@ -23,6 +27,8 @@ class FakeChannel implements ChannelLike<FakeChannel> {
   /** The status callback passed to `subscribe()`. */
   statusCallback: ((status: string) => void) | null = null;
   subscribeCalls = 0;
+
+  constructor(private readonly log: string[]) {}
 
   on(
     _type: 'postgres_changes',
@@ -36,6 +42,7 @@ class FakeChannel implements ChannelLike<FakeChannel> {
   subscribe(callback: (status: string) => void): FakeChannel {
     this.subscribeCalls += 1;
     this.statusCallback = callback;
+    this.log.push('subscribe');
     return this;
   }
 
@@ -56,10 +63,40 @@ class FakeClient implements RealtimeClientLike<FakeChannel> {
   readonly channels: FakeChannel[] = [];
   readonly names: string[] = [];
   readonly removedChannels: FakeChannel[] = [];
+  /** Every auth and channel step in the order it happened. */
+  readonly log: string[] = [];
+  /** Resolves the pending `getSession()`; set when `deferSession` is true. */
+  releaseSession: (() => void) | null = null;
+
+  constructor(
+    private readonly accessToken: string | null = 'jwt-user',
+    private readonly deferSession = false,
+  ) {}
+
+  readonly auth = {
+    getSession: async (): Promise<{ data: { session: { access_token: string } | null } }> => {
+      this.log.push('getSession');
+      if (this.deferSession) {
+        await new Promise<void>((resolve) => {
+          this.releaseSession = resolve;
+        });
+      }
+      return {
+        data: { session: this.accessToken === null ? null : { access_token: this.accessToken } },
+      };
+    },
+  };
+
+  readonly realtime = {
+    setAuth: async (token?: string): Promise<void> => {
+      this.log.push(`setAuth:${token ?? 'callback'}`);
+    },
+  };
 
   channel(name: string): FakeChannel {
+    this.log.push('channel');
     this.names.push(name);
-    const channel = new FakeChannel();
+    const channel = new FakeChannel(this.log);
     this.channels.push(channel);
     return channel;
   }
@@ -73,14 +110,23 @@ class FakeClient implements RealtimeClientLike<FakeChannel> {
   }
 }
 
-function setup() {
-  const client = new FakeClient();
+/**
+ * Lets the auth-then-join chain run. `subscribeToSession` stays synchronous for
+ * the caller, but the join now waits for two promises, so the tests have to let
+ * the microtask queue drain. Fake timers do not touch microtasks.
+ */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+}
+
+async function setup(client: FakeClient = new FakeClient()) {
   const onEvent = vi.fn();
   const statuses: RealtimeStatus[] = [];
   const stop = subscribeToSession(client, 'S1', {
     onEvent,
     setStatus: (status) => statuses.push(status),
   });
+  await flush();
   return { client, onEvent, statuses, stop };
 }
 
@@ -94,8 +140,8 @@ afterEach(() => {
 });
 
 describe('subscribeToSession', () => {
-  it('opens exactly one channel and listens to the three session tables', () => {
-    const { client, stop } = setup();
+  it('opens exactly one channel and listens to the three session tables', async () => {
+    const { client, stop } = await setup();
 
     expect(client.channels).toHaveLength(1);
     expect(client.names).toEqual(['session:S1']);
@@ -108,8 +154,63 @@ describe('subscribeToSession', () => {
     stop();
   });
 
-  it('reports live on SUBSCRIBED and forwards every change', () => {
-    const { client, onEvent, statuses, stop } = setup();
+  it('sets the access token on the socket before the channel joins', async () => {
+    const { client, stop } = await setup();
+
+    // Order matters: realtime-js builds the join payload synchronously from
+    // `socket.accessTokenValue`. A join before setAuth goes out as `anon`.
+    expect(client.log).toEqual(['getSession', 'setAuth:jwt-user', 'channel', 'subscribe']);
+    stop();
+  });
+
+  it('does not join at all while the session is still being read', async () => {
+    const client = new FakeClient('jwt-user', true);
+    const stop = subscribeToSession(client, 'S1', { onEvent: () => {}, setStatus: () => {} });
+    await flush();
+
+    expect(client.log).toEqual(['getSession']);
+    expect(client.channels).toHaveLength(0);
+
+    client.releaseSession?.();
+    await flush();
+
+    expect(client.log).toEqual(['getSession', 'setAuth:jwt-user', 'channel', 'subscribe']);
+    stop();
+  });
+
+  it('never joins when the session arrives only after teardown', async () => {
+    const client = new FakeClient('jwt-user', true);
+    const stop = subscribeToSession(client, 'S1', { onEvent: () => {}, setStatus: () => {} });
+    await flush();
+
+    stop();
+    client.releaseSession?.();
+    await flush();
+
+    expect(client.channels).toHaveLength(0);
+  });
+
+  it('falls back to the token callback when there is no session', async () => {
+    const { client, stop } = await setup(new FakeClient(null));
+
+    expect(client.log).toEqual(['getSession', 'setAuth:callback', 'channel', 'subscribe']);
+    stop();
+  });
+
+  it('joins anyway when reading the session fails', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = new FakeClient();
+    vi.spyOn(client.auth, 'getSession').mockRejectedValue(new Error('no cookie'));
+    const stop = subscribeToSession(client, 'S1', { onEvent: () => {}, setStatus: () => {} });
+    await flush();
+
+    expect(errors).toHaveBeenCalled();
+    expect(client.channels).toHaveLength(1);
+    stop();
+  });
+
+  it('reports live on SUBSCRIBED and forwards every change', async () => {
+    const { client, onEvent, statuses, stop } = await setup();
 
     client.channels[0].emit('SUBSCRIBED');
     client.channels[0].emitChange('entries');
@@ -120,11 +221,12 @@ describe('subscribeToSession', () => {
     stop();
   });
 
-  it('replaces the broken channel after CHANNEL_ERROR instead of re-subscribing it', () => {
-    const { client, statuses, stop } = setup();
+  it('replaces the broken channel after CHANNEL_ERROR instead of re-subscribing it', async () => {
+    const { client, statuses, stop } = await setup();
     const broken = client.channels[0];
 
     broken.emit('CHANNEL_ERROR');
+    await flush();
 
     // The errored channel is gone (a second subscribe() on it would be a no-op
     // in realtime-js), a fresh one took over — with a status callback.
@@ -139,10 +241,30 @@ describe('subscribeToSession', () => {
     stop();
   });
 
-  it('goes back to live on the new channel and never shows the hint', () => {
-    const { client, onEvent, statuses, stop } = setup();
+  it('re-authenticates before the retry joins', async () => {
+    const { client, stop } = await setup();
 
     client.channels[0].emit('CHANNEL_ERROR');
+    await flush();
+
+    expect(client.log).toEqual([
+      'getSession',
+      'setAuth:jwt-user',
+      'channel',
+      'subscribe',
+      'getSession',
+      'setAuth:jwt-user',
+      'channel',
+      'subscribe',
+    ]);
+    stop();
+  });
+
+  it('goes back to live on the new channel and never shows the hint', async () => {
+    const { client, onEvent, statuses, stop } = await setup();
+
+    client.channels[0].emit('CHANNEL_ERROR');
+    await flush();
     client.channels[1].emit('SUBSCRIBED');
     vi.advanceTimersByTime(60_000);
     client.channels[1].emitChange('entries');
@@ -152,11 +274,13 @@ describe('subscribeToSession', () => {
     stop();
   });
 
-  it('retries only once and then shows the hint after 10 seconds', () => {
-    const { client, statuses, stop } = setup();
+  it('retries only once and then shows the hint after 10 seconds', async () => {
+    const { client, statuses, stop } = await setup();
 
     client.channels[0].emit('CHANNEL_ERROR');
+    await flush();
     client.channels[1].emit('TIMED_OUT');
+    await flush();
 
     expect(client.channels).toHaveLength(2);
     expect(statuses).toEqual(['connecting', 'connecting']);
@@ -168,22 +292,25 @@ describe('subscribeToSession', () => {
     stop();
   });
 
-  it('arms the hint only once, no matter how many errors arrive', () => {
-    const { client, statuses, stop } = setup();
+  it('arms the hint only once, no matter how many errors arrive', async () => {
+    const { client, statuses, stop } = await setup();
 
     client.channels[0].emit('CHANNEL_ERROR');
+    await flush();
     client.channels[1].emit('TIMED_OUT');
     client.channels[1].emit('CHANNEL_ERROR');
+    await flush();
     vi.advanceTimersByTime(20_000);
 
     expect(statuses.filter((status) => status === 'disconnected')).toHaveLength(1);
     stop();
   });
 
-  it('removes the active channel on teardown and stays silent afterwards', () => {
-    const { client, onEvent, statuses, stop } = setup();
+  it('removes the active channel on teardown and stays silent afterwards', async () => {
+    const { client, onEvent, statuses, stop } = await setup();
 
     client.channels[0].emit('CHANNEL_ERROR');
+    await flush();
     stop();
 
     expect(client.wasRemoved(client.channels[1])).toBe(true);
@@ -197,11 +324,12 @@ describe('subscribeToSession', () => {
     expect(onEvent).not.toHaveBeenCalled();
   });
 
-  it('does not remove the same channel twice', () => {
-    const { client, stop } = setup();
+  it('does not remove the same channel twice', async () => {
+    const { client, stop } = await setup();
     const removeSpy = vi.spyOn(client, 'removeChannel');
 
     client.channels[0].emit('CHANNEL_ERROR');
+    await flush();
     stop();
     stop();
 
@@ -210,19 +338,21 @@ describe('subscribeToSession', () => {
     expect(removeSpy.mock.calls[1][0]).toBe(client.channels[1]);
   });
 
-  it('survives a client that throws while reconnecting', () => {
-    const client = new FakeClient();
+  it('survives a client that throws while reconnecting', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = new FakeClient();
     const statuses: RealtimeStatus[] = [];
     const stop = subscribeToSession(client, 'S1', {
       onEvent: () => {},
       setStatus: (status) => statuses.push(status),
     });
+    await flush();
 
     vi.spyOn(client, 'channel').mockImplementation(() => {
       throw new Error('offline');
     });
     client.channels[0].emit('CHANNEL_ERROR');
+    await flush();
 
     expect(statuses).toEqual(['connecting']);
     expect(errors).toHaveBeenCalled();
