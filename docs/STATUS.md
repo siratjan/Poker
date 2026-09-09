@@ -10,8 +10,8 @@
 | WP5 | Session-Detail | b78f067 + 43276b5 + b5c4203 | FREIGEGEBEN (6 Minor, F1–F4 behoben, F5/F6 → WP7); Planer-Blocker Realtime (Join vor Token) in Runde 3 behoben | Browser: Buy-in 3 Tipps, Cash-out, Kacheln, Realtime 2 Tabs ≤ 2 s ✔ | 2026-09-09 |
 | WP6 | Abschluss + Abrechnung | 5f83003 | FREIGEGEBEN (3 Minor: F1 behoben, F2/F3 → WP8-Vorab) | Browser: Differenz-Pfad, Abschluss, eingefrorene Abrechnung, Kopieren, Wieder öffnen ✔ (Mobile 375 px offen) | 2026-09-09 |
 | WP7 | Spieler-Übersicht | 642446e | FREIGEGEBEN (6 Minor → WP9-Polish) | Browser: Migration 0007 einspielen, dann prüfen | 2026-09-09 |
-| WP8 | Admin + Audit-Log | 1dfaea1 + d4933df | NACHARBEIT Runde 1 (1 Major, 3 Minor) → F1–F3 behoben, Runde 2 läuft | Browser: Admin, Log, Letzter-Admin-Schutz ✔; Filter nach Fix prüfen | 2026-09-09 |
-| WP9 | PWA + Polish | – | – | – | – |
+| WP8 | Admin + Audit-Log | 1dfaea1 + d4933df | FREIGEGEBEN (Runde 2; F1–F3 behoben, F4 Whitelist-Audit offen) | Browser: Admin, Log, Letzter-Admin-Schutz, Filterwechsel ✔; „Mehr laden" ab 50 Zeilen offen | 2026-09-09 |
+| WP9 | PWA + Polish | 488ac03 | Gaby prüft | Lighthouse 98/100/100/100, PWA 100 (Siri); Handy-Install offen | 2026-09-09 |
 | WP10 | Deployment | – | – | – | – |
 
 ## Vom Auftraggeber offen

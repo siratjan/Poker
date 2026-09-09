@@ -1,6 +1,7 @@
 # WP8 – Prüfbericht Gaby
 
-**Urteil: NACHARBEIT**
+**Urteil Runde 1: NACHARBEIT — Urteil Runde 2 (`d4933df`): FREIGEGEBEN**
+(F1–F3 behoben, F4 bewusst offen; ein Pflicht-Browsercheck H1 → siehe Abschnitt „Runde 2" unten.)
 
 Geprüfter Stand: `1dfaea1` „WP8: admin area and audit log" (Merge `7139a56`) auf `main`.
 Diff-Basis: `f508297` (WP6-Abnahme), WP7-Anteile (`642446e`) ausgeklammert. Datum: 2026-09-09.
@@ -265,3 +266,144 @@ Dubletten werden abgewiesen. Whitelist-Adresse `"  Ali@Example.COM "` → `ali@e
   Entscheidung und ist kein Finding.
 - **Realtime** spielt in WP8 keine Rolle; es gibt in diesem Paket keinen Channel
   (`AuditLogList` abonniert nichts, also auch kein Leck).
+
+---
+
+# Runde 2
+
+**Urteil: FREIGEGEBEN** (mit einem Hinweis, den der Planer im Browser abhaken muss, H1).
+
+Geprüfter Stand: `d4933df` „WP8: address review findings (F1-F3)" (Merge `cba47c4`).
+Während meiner Prüfung ist WP9 (`488ac03`, Merge `a4cb930`) auf `main` gelandet; WP9 rührt
+keine der WP8-Dateien an, die hier zur Debatte stehen (`git diff cba47c4..a4cb930 --
+src/components/audit src/app/(app)/log src/lib/audit src/lib/validation/audit.ts
+src/actions/admin.ts` ergibt nur zwei **neue** Dateien `admin/loading.tsx` und
+`log/loading.tsx`). Alle Läufe unten sind auf `a4cb930` + meinen Tests, gelten also für beides.
+Datum: 2026-09-09.
+
+## Durchgeführt (Runde 2)
+
+| Befehl | Ergebnis |
+|---|---|
+| `npm run check` (typecheck + lint + test) vor meinen neuen Tests | **grün** – 46 Dateien, 984 Tests |
+| `npm run check` nach meinen neuen Tests (auf `a4cb930`, WP9 inbegriffen) | **grün** – 49 Dateien, **1031 Tests** |
+| `npx vitest run tests/gaby/wp8-admin-audit.gaby.test.ts` | **grün** – 65 Tests (55 aus Runde 1 unverändert + 10 neue) |
+| `npm run build` | **grün** – `/admin` und `/log` weiterhin dynamisch (ƒ) |
+| `npm run rls:smoke` (live) | **grün** – 29 Prüfungen, 29 beweisbar geblockt, 0 Lecks |
+
+Meine Tests aus Runde 1 wurden **nicht** abgeschwächt; ergänzt habe ich den Block
+„10. Runde 2 – Nachprüfung der behobenen Findings F1–F3" in
+`tests/gaby/wp8-admin-audit.gaby.test.ts` (Filterwechsel-Modell, Cursor-Einschleusversuche,
+`settings` × unbekannte Aktion).
+
+## Findings
+
+| # | Grad | Runde 1 | Runde 2 |
+|---|---|---|---|
+| F1 | Major | Filterwechsel ließ die Liste auf dem alten Client-State stehen | ✔ behoben |
+| F2 | Minor | Cursor `at` ging ungeprüft in den `or()`-Ausdruck | ✔ behoben |
+| F3 | Minor | `settings` × unbekannte Aktion behauptete etwas über Schnellbeträge | ✔ behoben |
+| F4 | Minor | kein Audit-Trigger auf `role_whitelist` | ⏸ bewusst offen (Planer-Entscheidung), kein SPEC-Bruch |
+
+### F1 ✔ – auch ohne den `key` richtig
+
+Zwei unabhängige Netze, beide geprüft:
+
+1. `src/app/(app)/log/page.tsx:36` – `key={auditListKey(filters)}`. `auditListKey`
+   (`src/lib/audit/filters.ts:67`) ist `log` + Querystring, und `auditFiltersToQuery` schreibt
+   die drei Parameter in **fester** Reihenfolge (`session`, `user`, `table`), der Schlüssel ist
+   also stabil und für jede Kombination verschieden. Ich habe alle 7 Kombinationen
+   durchgerechnet: 7 verschiedene Schlüssel, identische Filter ergeben denselben, jede
+   Einzeländerung (auch „Filter zurücksetzen") ändert ihn.
+2. `src/components/audit/AuditLogList.tsx:57-69` – `entries`/`names`/`cursor` liegen **zusammen
+   mit** dem `filterKey`, aus dem sie stammen, in **einem** State-Objekt; passt er nicht zu den
+   Props, wird der Zustand noch in der Render-Phase aus den neuen Props ersetzt und `error`
+   geleert. Das ist das von React dokumentierte Muster (setState des eigenen Bauteils während
+   des Renderns; React verwirft die Ausgabe und rendert sofort neu, kein Effekt-Flackern, keine
+   Endlosschleife, weil der zweite Durchlauf `loaded.filterKey === filterKey` erfüllt).
+   **Ohne den `key` wäre das Verhalten also ebenfalls richtig** — genau das habe ich gefordert.
+
+Race „Mehr laden" + Filterwechsel — durchgespielt:
+
+- Der Cursor kann nicht mehr aus einem anderen Filter stammen: `loadMore` liest ihn aus
+  `loaded` (`AuditLogList.tsx:71`), und `loaded` trägt den Filter, aus dem er kommt. Der alte
+  Fehlerpfad „alter Cursor + neue Filter" ist damit strukturell ausgeschlossen, nicht nur
+  zeitlich unwahrscheinlich.
+- Trifft die Antwort **nach** dem Wechsel ein, greift `if (current.filterKey !== filterKey)
+  return current;` (`:92`). `filterKey` ist dabei der Wert aus dem Render, in dem geklickt
+  wurde (Closure), `current` der Stand beim Anwenden — die Prüfung vergleicht also wirklich
+  „Filter beim Absenden" gegen „Filter jetzt". Verworfen statt angehängt.
+- Sonderfall A→B→A während des Fluges: die Antwort wird angehängt, und das ist korrekt —
+  Seite 2 von A landet an Seite 1 von A, keine Dublette, kein Loch (mein Modelltest fährt
+  genau diese Reihenfolge).
+- Mit `key` remountet die Liste ohnehin, dann ist die Antwort an eine tote Instanz gerichtet
+  und läuft ins Leere.
+
+Nachgewiesen durch: `src/lib/audit/filters.test.ts` (Siri) und meinen neuen Block —
+Schlüssel-Eigenschaften, statische Zusagen auf beide Netze (`key=`,
+`if (loaded.filterKey !== filterKey)`, `if (current.filterKey !== filterKey) return current;`,
+kein `useState(initialEntries)` mehr) und ein Modell des Zustandsautomaten, das Filterwechsel,
+verspätete Antwort, passende Antwort und Zurücksetzen durchspielt.
+
+Ehrlich zur Grenze: ein echter Mount-Test bräuchte `@testing-library/react`, also eine neue
+Abhängigkeit — die verlange ich für dieses Paket nicht. Die Browser-Gegenprobe (Punkt 4 der
+Liste oben) bleibt trotzdem der letzte Beweis.
+
+Rest-Kosmetik, **kein Finding**: `pending` steht außerhalb des Zustandsobjekts. Wechselt man
+ohne den `key` (also nur über das zweite Netz) den Filter, während eine Seite fliegt, bleibt
+der Knopf bis zum Eintreffen der verworfenen Antwort auf „Lädt …". `setPending(false)` läuft
+danach unbedingt, das heilt sich selbst; mit dem `key` kann der Fall gar nicht auftreten.
+
+### F2 ✔ – Cursor streng validiert, `id` bleibt korrekterweise eine Zahl
+
+`isAuditCursorTimestamp` (`src/lib/audit/cursor.ts:32`) steht direkt neben der Stelle, an der
+der Wert in den `or()`-Ausdruck geht, und `src/lib/validation/audit.ts:31-34` prüft `cursor.at`
+dagegen (plus `max(64)`). Meine Einschleusversuche laufen jetzt alle gegen die Wand:
+`2026-01-01,id.gte.0`, `…+00:00,id.gte.0`, `…+00:00)or(id.gte.0`, `…+00:00,or(true)`,
+`…' or '1'='1`, `…;drop table audit_log`, `at.lt.…`, führendes/anhängendes Leerzeichen,
+eingebettetes `\n` (JS-`$` ohne `m` matcht **nicht** vor einem Zeilenumbruch — geprüft),
+Datum ohne Zeit, Zeit ohne Offset, `abc`, `''`, `*`, `null`, überlanger Wert.
+Was durchkommt, ergibt einen Filter mit genau zwei Kommas und einem Klammerpaar.
+
+**Abweichung `cursor.id` bleibt Integer statt UUID: bestätigt, passt zum Schema.**
+`supabase/migrations/0001_schema.sql:235` definiert `audit_log.id bigserial primary key` —
+eine UUID wäre hier fachlich falsch, würde jede Pagination sofort brechen und stünde im
+Widerspruch zu `audit_log_at_idx (at desc, id desc)`. Mein Test aus Runde 1
+(`{ at: …, id: 42 }` gültig) bleibt damit richtig; ich habe ihn um eine Zusage auf die
+Schemazeile ergänzt, damit ein späterer Typwechsel auffällt. Eine Zahl kann in den
+`or()`-Ausdruck nichts einschleusen; `'42'`, `1.5`, `-1`, `NaN`, `Infinity`, `null` und eine
+UUID werden abgewiesen, `0` und `Number.MAX_SAFE_INTEGER` angenommen.
+
+### F3 ✔ – unbekannte Aktion fällt auf den generischen Satz
+
+`src/lib/audit/describe.ts:328` – `settings` verhält sich jetzt wie jede andere Tabelle.
+Geprüft mit `TRUNCATE`, `''`, `SELECT`, `insert` (Kleinschreibung), `UPSERT`: immer
+„hat einen Eintrag in „Einstellungen" verändert". `INSERT`/`UPDATE`/`DELETE` unverändert
+(„hat die Schnellbeträge auf 50,00 € / 100,00 € gesetzt", „hat die Einstellung „theme"
+gelöscht") — meine Robustheitsschleife und die Matrix aus Runde 1 bleiben grün.
+
+### F4 ⏸ – bleibt offen
+
+Planer-Entscheidung, kein SPEC-Bruch (Begründung in Runde 1 unverändert gültig). Ich
+wiederhole nur den Hinweis: Whitelist-Vergaben sind der einzige Weg zu Rechten ohne Logzeile.
+
+## H1 – ein Hinweis, den der Planer abhaken muss
+
+Die Cursor-Prüfung ist jetzt **streng**, und `nextCursor.at` ist der rohe Zeitstempel-String
+aus PostgREST (`src/lib/queries/auditLog.ts:82`). Akzeptiert werden `Z`, `+HH:MM` und `+HHMM`;
+ein Offset in der Kurzform `+00` (die Postgres im **Textformat** durchaus ausgibt) würde
+abgewiesen. In der JSON-Antwort erwarte ich `+00:00` — nachprüfen konnte ich das ohne Login
+nicht. Wäre es anders, schlüge nicht die Sicherheit fehl, sondern der Knopf „Mehr laden"
+(Toast „Ungültiger Cursor."). **Deshalb Pflicht vor der Abnahme:** Punkt 5 der Browserliste
+oben mit mehr als 50 Zeilen im Log einmal wirklich klicken. Schlägt es fehl, ist das ein
+Blocker für WP8 und eine Zeile Regex bei Siri.
+
+## Nicht verifiziert (Runde 2)
+
+- **Kein Browser.** F1 ist weiterhin statisch plus Modell belegt, nicht geklickt. Punkte 1–10
+  der Browserliste oben stehen unverändert; entscheidend sind jetzt **Punkt 4** (Filterwechsel
+  zeigt sofort die gefilterte Liste) und **Punkt 5** (siehe H1).
+- **Echtes PostgREST-Verhalten** bei Cursor und `or()` — unverändert abgeleitet, nicht gegen
+  den Server gefahren.
+- **WP9** ist in diesen Läufen mitgelaufen (Check und Build grün), aber **nicht geprüft** —
+  das ist ein eigenes Paket.

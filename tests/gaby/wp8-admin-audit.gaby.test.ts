@@ -27,7 +27,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { auditCursorFilter, isAfterCursor, type AuditCursor } from '@/lib/audit/cursor';
+import {
+  auditCursorFilter,
+  isAfterCursor,
+  isAuditCursorTimestamp,
+  type AuditCursor,
+} from '@/lib/audit/cursor';
 import {
   AUDITED_TABLES,
   auditActionLabel,
@@ -38,9 +43,12 @@ import {
 } from '@/lib/audit/describe';
 import {
   auditFiltersToQuery,
+  auditListKey,
   hasAuditFilters,
+  NO_AUDIT_FILTERS,
   parseAuditFilters,
   sessionLogHref,
+  type AuditFilters,
 } from '@/lib/audit/filters';
 import type { Json } from '@/lib/database.types';
 import {
@@ -623,5 +631,195 @@ describe('Rollenwächter und Serverseitigkeit', () => {
     expect(source).toMatch(/\.order\('id', \{ ascending: false \}\)/);
     expect(source).not.toContain('.range(');
     expect(source).not.toMatch(/\.insert\(|\.update\(|\.delete\(|\.upsert\(/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Runde 2 – Nachprüfung der behobenen Findings F1–F3
+// ---------------------------------------------------------------------------
+
+describe('Runde 2 / F1 – Filterwechsel wirft die geladenen Seiten weg', () => {
+  const COMBINATIONS: AuditFilters[] = [
+    NO_AUDIT_FILTERS,
+    { sessionId: SESSION, userId: null, tableName: null },
+    { sessionId: null, userId: USER, tableName: null },
+    { sessionId: null, userId: null, tableName: 'entries' },
+    { sessionId: null, userId: null, tableName: 'sessions' },
+    { sessionId: SESSION, userId: USER, tableName: 'entries' },
+    { sessionId: SESSION, userId: USER, tableName: 'sessions' },
+  ];
+
+  it('jede Filterkombination bekommt einen eigenen, stabilen Schlüssel', () => {
+    const keys = COMBINATIONS.map(auditListKey);
+    expect(new Set(keys).size).toBe(COMBINATIONS.length);
+    for (const filters of COMBINATIONS) {
+      expect(auditListKey({ ...filters })).toBe(auditListKey(filters));
+      expect(auditListKey(filters)).toBe(`log${auditFiltersToQuery(filters)}`);
+    }
+  });
+
+  it('der Schlüssel ändert sich bei jeder Einzeländerung – auch beim Zurücksetzen', () => {
+    const base: AuditFilters = { sessionId: SESSION, userId: USER, tableName: 'entries' };
+    for (const next of [
+      { ...base, tableName: 'players' },
+      { ...base, tableName: null },
+      { ...base, sessionId: null },
+      { ...base, userId: null },
+      NO_AUDIT_FILTERS,
+    ]) {
+      expect(auditListKey(next)).not.toBe(auditListKey(base));
+    }
+  });
+
+  it('die Seite remountet die Liste, das Bauteil hat zusätzlich ein eigenes Netz', () => {
+    const page = read('src/app/(app)/log/page.tsx');
+    expect(page).toContain('key={auditListKey(filters)}');
+
+    const list = read('src/components/audit/AuditLogList.tsx');
+    // Zustand und Herkunft liegen in einem Objekt, sonst könnten sie auseinanderlaufen.
+    expect(list).toMatch(/const filterKey = auditListKey\(filters\)/);
+    expect(list).toMatch(/useState\(\{\s*filterKey,/);
+    // Neuaufbau in der Render-Phase (React: „Zustand an Props angleichen“).
+    expect(list).toContain('if (loaded.filterKey !== filterKey)');
+    expect(list).toMatch(/setLoaded\(\{ filterKey, entries: initialEntries/);
+    // Verspätete Antwort von loadAuditPage wird verworfen statt angehängt.
+    expect(list).toContain('if (current.filterKey !== filterKey) return current;');
+    // Der Cursor für „Mehr laden“ stammt immer aus demselben Zustandsobjekt.
+    expect(list).toContain('const { entries, names, cursor } = loaded;');
+    expect(list).toContain('loadAuditPage({ filters, cursor })');
+    expect(list).not.toMatch(/useState\((?:initialEntries|initialCursor|initialNames)\)/);
+  });
+
+  it('Modell des Bauteils: Filterwechsel und verspätete Antwort (F1)', () => {
+    type Loaded = { filterKey: string; entries: number[]; cursor: number | null };
+
+    /** Render-Phase: Zustand an die Props angleichen (AuditLogList.tsx:66-69). */
+    const render = (loaded: Loaded, filters: AuditFilters, initial: Loaded): Loaded =>
+      loaded.filterKey === auditListKey(filters) ? loaded : initial;
+
+    /** Antwort von loadAuditPage (AuditLogList.tsx:90-102). */
+    const onResponse = (current: Loaded, capturedKey: string, page: number[]): Loaded =>
+      current.filterKey !== capturedKey
+        ? current
+        : { filterKey: capturedKey, entries: [...current.entries, ...page], cursor: null };
+
+    const allKey = auditListKey(NO_AUDIT_FILTERS);
+    const entriesFilter: AuditFilters = { sessionId: null, userId: null, tableName: 'entries' };
+    const entriesKey = auditListKey(entriesFilter);
+
+    // Start: ungefilterte erste Seite.
+    let state: Loaded = { filterKey: allKey, entries: [1, 2, 3], cursor: 3 };
+
+    // Filter „Bereich = Einträge“: die Seite liefert eine neue erste Seite.
+    const firstPageOfFilter: Loaded = { filterKey: entriesKey, entries: [7, 8], cursor: 8 };
+    state = render(state, entriesFilter, firstPageOfFilter);
+    expect(state.entries).toEqual([7, 8]);
+    expect(state.cursor).toBe(8);
+
+    // Die vor dem Wechsel abgeschickte „Mehr laden“-Antwort trifft jetzt ein.
+    state = onResponse(state, allKey, [4, 5, 6]);
+    expect(state.entries).toEqual([7, 8]);
+
+    // Eine Antwort zum aktuellen Filter wird angehängt.
+    state = onResponse(state, entriesKey, [9]);
+    expect(state.entries).toEqual([7, 8, 9]);
+
+    // Zurücksetzen: wieder die servergerenderte erste Seite, kein alter Cursor.
+    state = render(state, NO_AUDIT_FILTERS, { filterKey: allKey, entries: [1, 2, 3], cursor: 3 });
+    expect(state.entries).toEqual([1, 2, 3]);
+    expect(state.cursor).toBe(3);
+  });
+});
+
+describe('Runde 2 / F2 – Cursor wird als Zeitstempel validiert', () => {
+  const OK = '2026-09-12T19:00:00+00:00';
+
+  it('nimmt die Formate an, die Postgres für timestamptz liefert', () => {
+    for (const at of [
+      OK,
+      '2026-09-12T19:14:00.123456+00:00',
+      '2026-09-12T19:00:00Z',
+      '2026-09-12T19:00:00.5+02:00',
+      '2026-09-12T19:00:00+0200',
+    ]) {
+      expect(isAuditCursorTimestamp(at)).toBe(true);
+      expect(auditPageSchema.safeParse({ cursor: { at, id: 42 } }).success).toBe(true);
+    }
+  });
+
+  it('weist alles ab, was eine Bedingung in den or(…)-Ausdruck schmuggeln könnte', () => {
+    const attacks = [
+      '2026-01-01,id.gte.0',
+      `${OK},id.gte.0`,
+      `${OK})or(id.gte.0`,
+      `${OK},or(true)`,
+      `${OK}' or '1'='1`,
+      `${OK};drop table audit_log`,
+      `at.lt.${OK}`,
+      `${OK}\n${OK}`,
+      ` ${OK}`,
+      `${OK} `,
+      '2026-09-12',
+      '2026-09-12T19:00:00',
+      'abc',
+      '',
+      '*',
+      'null',
+      OK.repeat(3),
+    ];
+
+    for (const at of attacks) {
+      expect(isAuditCursorTimestamp(at)).toBe(false);
+      expect(auditPageSchema.safeParse({ cursor: { at, id: 1 } }).success).toBe(false);
+    }
+  });
+
+  it('was die Prüfung passiert, ergibt einen sauberen Filter ohne Sonderzeichen', () => {
+    const filter = auditCursorFilter({ at: OK, id: 42 });
+    expect(filter).toBe(`at.lt.${OK},and(at.eq.${OK},id.lt.42)`);
+    // Genau zwei Kommas und ein Klammerpaar – nichts Eingeschleustes.
+    expect(filter.split(',')).toHaveLength(3);
+    expect(filter.split('(')).toHaveLength(2);
+    expect(filter.split(')')).toHaveLength(2);
+  });
+
+  it('cursor.id bleibt eine Ganzzahl – audit_log.id ist bigserial, keine UUID', () => {
+    const schema = read('supabase/migrations/0001_schema.sql');
+    expect(schema).toMatch(/create table if not exists public\.audit_log \(\s*\n\s*id\s+bigserial/);
+
+    expect(auditPageSchema.safeParse({ cursor: { at: OK, id: 0 } }).success).toBe(true);
+    expect(auditPageSchema.safeParse({ cursor: { at: OK, id: 9007199254740991 } }).success).toBe(
+      true,
+    );
+    for (const id of [SESSION, '42', 1.5, -1, Number.NaN, Number.POSITIVE_INFINITY, null]) {
+      expect(auditPageSchema.safeParse({ cursor: { at: OK, id } }).success).toBe(false);
+    }
+  });
+});
+
+describe('Runde 2 / F3 – settings mit unbekannter Aktion', () => {
+  it('behauptet nichts über Schnellbeträge', () => {
+    for (const action of ['TRUNCATE', '', 'SELECT', 'insert', 'UPSERT']) {
+      expect(
+        say({
+          tableName: 'settings',
+          action,
+          newData: { key: 'quick_amounts_cents', value: [5000] },
+        }),
+      ).toBe('hat einen Eintrag in „Einstellungen“ verändert');
+    }
+  });
+
+  it('die bekannten Aktionen sind unverändert', () => {
+    expect(
+      say({
+        tableName: 'settings',
+        action: 'UPDATE',
+        newData: { key: 'quick_amounts_cents', value: [5000, 10000] },
+      }),
+    ).toBe('hat die Schnellbeträge auf 50,00 € / 100,00 € gesetzt');
+    expect(
+      say({ tableName: 'settings', action: 'DELETE', oldData: { key: 'theme', value: 'dark' } }),
+    ).toBe('hat die Einstellung „theme“ gelöscht');
   });
 });
