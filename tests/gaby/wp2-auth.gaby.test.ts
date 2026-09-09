@@ -250,9 +250,18 @@ describe('Repo-Zusagen (WP2 Testauftrag)', () => {
     }
   });
 
-  it('greift überhaupt nur aus Server-Dateien auf app_users zu', () => {
-    const withTable = SRC_FILES.filter((file) => /\.from\(/.test(read(file)));
-    expect(withTable).toEqual(['src/lib/auth/getCurrentUser.ts']);
+  // WP2-Momentaufnahme, ab WP4 (Gaby) verallgemeinert: WP4 fügt planmäßig
+  // serverseitige Tabellenzugriffe hinzu (src/lib/queries/*, src/actions/*),
+  // daher ist die feste 1-Datei-Liste überholt. Die dahinterstehende Zusage ist
+  // stärker und bleibt eingefroren: JEDE Datei mit .from( oder .rpc( ist
+  // serverseitig, also keine 'use client'-Komponente. getCurrentUser (WP2) muss
+  // weiterhin unter den Server-Lesern sein.
+  it('greift überhaupt nur aus Server-Dateien auf eine Tabelle zu', () => {
+    const withTable = SRC_FILES.filter((file) => /\.from\(|\.rpc\(/.test(read(file)));
+    for (const file of withTable) {
+      expect(/^['"]use client['"]/m.test(read(file)), `${file} ist 'use client'`).toBe(false);
+    }
+    expect(withTable).toContain('src/lib/auth/getCurrentUser.ts');
   });
 
   it('markiert jede Datei in src/actions als Server Action', () => {

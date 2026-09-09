@@ -1,46 +1,89 @@
-import { RoleGate } from '@/components/auth/RoleGate';
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { SessionStatusBadge } from '@/components/ui/Badge';
+import { buttonClasses } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
-import { ROLE_LABELS } from '@/lib/auth/roles';
+import { loginPathFor } from '@/lib/auth/paths';
+import { canEdit } from '@/lib/auth/roles';
+import { formatCents } from '@/lib/money';
+import { listSessions, type SessionListItem } from '@/lib/queries/sessions';
+import { formatPlayedOn } from '@/lib/time';
 
 /**
- * Placeholder start page (WP2). WP4 replaces it with the session list.
+ * Session list / start page (docs/ARBEITSPAKETE.md WP4, step 4). Newest first,
+ * one card per session, sticky „Neue Session“ button for editors.
  */
-export default async function HomePage() {
+export default async function SessionsPage() {
   const user = await getCurrentUser();
-  if (user === null) return null; // the layout has already redirected
+  if (user === null) redirect(loginPathFor('/'));
+
+  const sessions = await listSessions();
+  const mayEdit = canEdit(user.role);
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-black/10 p-4 dark:border-white/10">
-        <h1 className="text-lg font-semibold">Angemeldet</h1>
-        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-          <dt className="opacity-60">Name</dt>
-          <dd>{user.displayName}</dd>
-          <dt className="opacity-60">E-Mail</dt>
-          <dd className="truncate">{user.email}</dd>
-          <dt className="opacity-60">Rolle</dt>
-          <dd>
-            <span className="rounded-full bg-emerald-600/15 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-              {ROLE_LABELS[user.role]}
-            </span>
-          </dd>
-        </dl>
-      </div>
+      <h1 className="text-lg font-semibold">Sessions</h1>
 
-      <RoleGate
-        role={user.role}
-        minimum="editor"
-        fallback={
-          <p className="text-sm opacity-70">
-            Als Betrachter kannst du alles lesen, aber nichts erfassen.
-          </p>
-        }
-      >
-        <p className="text-sm opacity-70">
-          Du darfst Sessions anlegen und Buy-ins erfassen. Die Ansichten dazu kommen im nächsten
-          Paket.
-        </p>
-      </RoleGate>
+      {sessions.length === 0 ? (
+        <EmptyState
+          title="Noch keine Session."
+          description={mayEdit ? 'Leg die erste an.' : 'Ein Bearbeiter kann die erste anlegen.'}
+          action={
+            mayEdit ? (
+              <Link href="/sessions/new" className={buttonClasses({ size: 'lg' })}>
+                Neue Session
+              </Link>
+            ) : undefined
+          }
+        />
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {sessions.map((session) => (
+            <li key={session.id}>
+              <SessionCard session={session} />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {mayEdit && sessions.length > 0 ? (
+        <div
+          className="fixed inset-x-0 bottom-0 z-30 px-4"
+          style={{ paddingBottom: 'calc(72px + env(safe-area-inset-bottom))' }}
+        >
+          <div className="mx-auto max-w-2xl">
+            <Link
+              href="/sessions/new"
+              className={buttonClasses({ size: 'lg', className: 'w-full shadow-lg' })}
+            >
+              Neue Session
+            </Link>
+          </div>
+        </div>
+      ) : null}
     </section>
+  );
+}
+
+function SessionCard({ session }: { session: SessionListItem }) {
+  // „Spieler“ is the same in singular and plural.
+  const participants = `${session.participantCount} Spieler`;
+  const buyIns = `${formatCents(session.totalBuyInCents)} Buy-ins`;
+
+  return (
+    <Link href={`/sessions/${session.id}`} className="block">
+      <Card className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.04]">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm font-semibold">{formatPlayedOn(session.playedOn)}</span>
+          {session.name ? <span className="truncate text-sm opacity-80">{session.name}</span> : null}
+          <span className="text-xs opacity-60">
+            {participants} · {buyIns}
+          </span>
+        </div>
+        <SessionStatusBadge status={session.status} />
+      </Card>
+    </Link>
   );
 }

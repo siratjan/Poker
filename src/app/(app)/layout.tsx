@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { TabBar } from '@/components/app/TabBar';
 import { UserMenu } from '@/components/app/UserMenu';
+import { ToastProvider } from '@/components/ui/Toast';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { loginPathFor } from '@/lib/auth/paths';
 import { isAdmin } from '@/lib/auth/roles';
@@ -31,7 +32,9 @@ export default async function AppLayout({ children }: LayoutProps<'/'>) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-4 pb-28">{children}</main>
+      <ToastProvider>
+        <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-4 pb-28">{children}</main>
+      </ToastProvider>
 
       <TabBar showAdmin={isAdmin(user.role)} />
     </div>

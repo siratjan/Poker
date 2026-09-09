@@ -523,7 +523,28 @@ export type Database = {
       };
     };
     Views: {
-      [_ in never]: never;
+      // Read view for the session list (supabase/migrations/0006_session_overview.sql).
+      // security_invoker, so the querying user's RLS applies. Read-only.
+      session_overview: {
+        Row: {
+          id: string;
+          played_on: string;
+          name: string | null;
+          status: Database['public']['Enums']['session_status'];
+          created_at: string;
+          participant_count: number;
+          total_buy_in_cents: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'sessions_id_fkey';
+            columns: ['id'];
+            isOneToOne: true;
+            referencedRelation: 'sessions';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
     Functions: {
       close_session: {
