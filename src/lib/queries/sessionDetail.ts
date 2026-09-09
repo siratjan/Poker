@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import type { Enums, Json } from '@/lib/database.types';
 import type { SessionEntry, SessionParticipant } from '@/lib/session/derive';
+import { fromStoredRows } from '@/lib/settlement/toPersist';
+import type { FrozenSettlement } from '@/lib/settlement/types';
 
 /**
  * Read query for the session detail screen (docs/ARBEITSPAKETE.md WP5, step 2).
@@ -35,8 +37,12 @@ export type SessionDetail = {
   session: SessionDetailHeader;
   participants: SessionParticipant[];
   entries: SessionEntry[];
-  /** A frozen settlement exists; WP6 renders it. */
-  hasSettlement: boolean;
+  /**
+   * The frozen settlement of a closed session, exactly as it was stored when it
+   * was closed — never recomputed (CLAUDE.md). `null` while the session is
+   * open.
+   */
+  settlement: FrozenSettlement | null;
   /** Quick buy-in amounts from `settings`, in cents. */
   quickAmountsCents: number[];
 };
@@ -71,7 +77,7 @@ export async function getSessionDetail(id: string): Promise<QueryResult<SessionD
       .select('id, player_id, type, amount_cents, payment, created_at, created_by')
       .eq('session_id', id)
       .order('created_at', { ascending: true }),
-    supabase.from('settlements').select('session_id').eq('session_id', id).maybeSingle(),
+    supabase.from('settlements').select('*').eq('session_id', id).maybeSingle(),
     supabase.from('settings').select('key, value').eq('key', 'quick_amounts_cents').maybeSingle(),
   ]);
 
@@ -130,6 +136,32 @@ export async function getSessionDetail(id: string): Promise<QueryResult<SessionD
     console.error('[queries] getSessionDetail (settings):', settingsResult.error.message);
   }
 
+  // The frozen settlement of a closed session. Money must never be shown half:
+  // if the lines or transfers cannot be read, the whole screen reports an error
+  // rather than rendering a settlement with rows missing.
+  const settlementHead = settlementResult.data;
+  let settlement: FrozenSettlement | null = null;
+  if (settlementHead !== null) {
+    const [linesResult, transfersResult] = await Promise.all([
+      supabase.from('settlement_lines').select('*').eq('session_id', id),
+      supabase.from('settlement_transfers').select('*').eq('session_id', id),
+    ]);
+
+    if (linesResult.error !== null || transfersResult.error !== null) {
+      console.error(
+        '[queries] getSessionDetail (settlement rows):',
+        linesResult.error?.message ?? transfersResult.error?.message,
+      );
+      return { ok: false, reason: 'error' };
+    }
+
+    settlement = fromStoredRows({
+      settlement: settlementHead,
+      lines: linesResult.data ?? [],
+      transfers: transfersResult.data ?? [],
+    });
+  }
+
   return {
     ok: true,
     data: {
@@ -146,7 +178,7 @@ export async function getSessionDetail(id: string): Promise<QueryResult<SessionD
       },
       participants,
       entries,
-      hasSettlement: settlementResult.data !== null,
+      settlement,
       quickAmountsCents: parseQuickAmounts(settingsResult.data?.value ?? null),
     },
   };

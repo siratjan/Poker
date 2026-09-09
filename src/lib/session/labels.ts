@@ -7,10 +7,14 @@ import type { DerivedParticipant, SessionEntry } from '@/lib/session/derive';
  * user reads is covered by unit tests.
  */
 
-/** A result always carries its sign: `+50,00 €` / `-50,00 €` / `0,00 €`. */
-export function formatSignedCents(cents: number): string {
-  return cents > 0 ? `+${formatCents(cents)}` : formatCents(cents);
-}
+/**
+ * A result always carries its sign: `+50,00 €` / `-50,00 €` / `0,00 €`.
+ *
+ * The implementation moved to `@/lib/money` in WP6, because the settlement view
+ * and the share text need it too and must not reach into the session labels.
+ * Re-exported here so the existing call sites keep their import.
+ */
+export { formatSignedCents } from '@/lib/money';
 
 /** „100,00 € bar + 50,00 € Liste“, or a hint when nothing was bought yet. */
 export function buyInLabel(participant: DerivedParticipant): string {

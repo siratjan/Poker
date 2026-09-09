@@ -26,6 +26,15 @@ export function formatCents(cents: number): string {
 }
 
 /**
+ * Like {@link formatCents}, but a positive amount keeps an explicit plus sign:
+ * `+50,00 €` / `-50,00 €` / `0,00 €`. Used wherever a result of the evening is
+ * shown (participant cards, settlement, share text).
+ */
+export function formatSignedCents(cents: number): string {
+  return cents > 0 ? `+${formatCents(cents)}` : formatCents(cents);
+}
+
+/**
  * Parses a user-typed euro amount into integer cents.
  *
  * Accepted: `"100"`, `"100,5"`, `"100.50"`, `"1.000,00"`, `"1,000.50"`,

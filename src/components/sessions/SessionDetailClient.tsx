@@ -12,6 +12,8 @@ import {
   removeParticipant,
   updateCashOut,
 } from '@/actions/entries';
+import { CloseSessionPanel } from '@/components/sessions/CloseSessionPanel';
+import { ClosedSessionSection } from '@/components/sessions/ClosedSessionSection';
 import { HistoryList } from '@/components/sessions/HistoryList';
 import { ParticipantCard } from '@/components/sessions/ParticipantCard';
 import {
@@ -83,11 +85,14 @@ export function SessionDetailClient({
   detail,
   allPlayers,
   canEdit,
+  isAdmin,
 }: {
   detail: SessionDetail;
   /** Every player, for the „Teilnehmer hinzufügen“ sheet. */
   allPlayers: PlayerListItem[];
   canEdit: boolean;
+  /** Only an admin may close with a difference or reopen (SPEC §3). */
+  isAdmin: boolean;
 }) {
   const router = useRouter();
   const { showSuccess, showError } = useToast();
@@ -135,6 +140,15 @@ export function SessionDetailClient({
   const pendingIds = useMemo<ReadonlySet<string>>(
     () => new Set(visiblePending.filter((item) => item.realId === null).map((item) => item.tempId)),
     [visiblePending],
+  );
+
+  // `playerId` -> name, for the settlement view and the share text.
+  const names = useMemo<Record<string, string>>(
+    () =>
+      Object.fromEntries(
+        participants.map((participant) => [participant.playerId, participant.name]),
+      ),
+    [participants],
   );
 
   const nameFor = useCallback(
@@ -298,6 +312,29 @@ export function SessionDetailClient({
           </ul>
         )}
       </div>
+
+      {isOpen && canEdit ? (
+        <CloseSessionPanel
+          sessionId={session.id}
+          participants={derived}
+          totals={totals}
+          names={names}
+          isAdmin={isAdmin}
+          onClosed={refresh}
+        />
+      ) : null}
+
+      {isOpen ? null : (
+        <ClosedSessionSection
+          sessionId={session.id}
+          playedOn={session.playedOn}
+          name={session.name}
+          settlement={detail.settlement}
+          names={names}
+          isAdmin={isAdmin}
+          onReopened={refresh}
+        />
+      )}
 
       <div className="flex flex-col gap-3">
         <h2 className="text-base font-semibold">Verlauf</h2>
@@ -466,10 +503,12 @@ function ClosedNotice({ detail }: { detail: SessionDetail }) {
           Differenz {formatSignedCents(session.discrepancyCents)}
         </span>
       ) : null}
-      {session.closeNote ? <span className="opacity-80">{session.closeNote}</span> : null}
+      {session.closeNote ? (
+        <span className="whitespace-pre-line opacity-80">{session.closeNote}</span>
+      ) : null}
       <span className="opacity-70">
-        Nichts an dieser Session lässt sich noch ändern. Die gespeicherte Abrechnung erscheint mit
-        dem nächsten Arbeitspaket hier.
+        Nichts an dieser Session lässt sich noch ändern. Die Abrechnung unten ist die
+        gespeicherte.
       </span>
     </div>
   );

@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { SessionDetailClient } from '@/components/sessions/SessionDetailClient';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { loginPathFor } from '@/lib/auth/paths';
-import { canEdit } from '@/lib/auth/roles';
+import { canEdit, isAdmin } from '@/lib/auth/roles';
 import { listPlayers } from '@/lib/queries/players';
 import { getSessionDetail } from '@/lib/queries/sessionDetail';
 
@@ -39,6 +39,11 @@ export default async function SessionDetailPage({ params }: PageProps<'/sessions
   const allPlayers = mayEdit && result.data.session.status === 'open' ? await listPlayers() : [];
 
   return (
-    <SessionDetailClient detail={result.data} allPlayers={allPlayers} canEdit={mayEdit} />
+    <SessionDetailClient
+      detail={result.data}
+      allPlayers={allPlayers}
+      canEdit={mayEdit}
+      isAdmin={isAdmin(user.role)}
+    />
   );
 }

@@ -95,3 +95,16 @@ export type SettlementResult = {
    */
   uncoveredDebts: number;
 };
+
+/**
+ * A settlement as it is *displayed*: either a fresh result or one read back
+ * from the database (docs/ARBEITSPAKETE.md WP6, step 4).
+ *
+ * Identical to {@link SettlementResult} except for `algorithmVersion`, which is
+ * a plain number here: a frozen settlement keeps the version it was computed
+ * with forever (SPEC §4), so a stored row may carry a version this build does
+ * not produce any more. Every `SettlementResult` is assignable to this type.
+ */
+export type FrozenSettlement = Omit<SettlementResult, 'algorithmVersion'> & {
+  algorithmVersion: number;
+};

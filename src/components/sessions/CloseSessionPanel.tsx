@@ -1,0 +1,357 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { closeSession, previewSettlement, type SettlementPreview } from '@/actions/close';
+import { SettlementView } from '@/components/settlement/SettlementView';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Sheet } from '@/components/ui/Sheet';
+import { useToast } from '@/components/ui/Toast';
+import { formatCents, formatSignedCents } from '@/lib/money';
+import { computeSettlement } from '@/lib/settlement';
+import { describeDiscrepancy } from '@/lib/settlement/shareText';
+import type { FrozenSettlement } from '@/lib/settlement/types';
+import { MAX_NOTE_LENGTH, MIN_NOTE_LENGTH } from '@/lib/validation/close';
+import type { DerivedParticipant, SessionTotals } from '@/lib/session/derive';
+
+/**
+ * The close area at the end of an open session (docs/ARBEITSPAKETE.md WP6,
+ * step 2): checklist, preview of the settlement, and the button that freezes it.
+ *
+ * The preview here is computed in the browser from the entries that are already
+ * on screen, so it follows every buy-in live. It is *not* what gets saved: the
+ * confirmation sheet asks the server for its own calculation (`previewSettlement`)
+ * and `closeSession` computes it a third time from `settlement_input` before it
+ * writes. No number from this component ever reaches the database.
+ */
+export function CloseSessionPanel({
+  sessionId,
+  participants,
+  totals,
+  names,
+  isAdmin,
+  onClosed,
+}: {
+  sessionId: string;
+  participants: readonly DerivedParticipant[];
+  totals: SessionTotals;
+  names: Readonly<Record<string, string>>;
+  isAdmin: boolean;
+  /** Called after a successful close, so the screen reloads from the server. */
+  onClosed: () => void;
+}) {
+  const { showError, showSuccess } = useToast();
+  const [note, setNote] = useState('');
+  const [confirming, setConfirming] = useState(false);
+
+  const preview = localPreview(participants);
+  const hasDiscrepancy = totals.canClose && totals.discrepancy !== 0;
+  const noteIsUsable = note.trim().length >= MIN_NOTE_LENGTH;
+
+  const blocked = blockingReason({
+    canClose: totals.canClose,
+    hasDiscrepancy,
+    isAdmin,
+    noteIsUsable,
+  });
+
+  async function submit(): Promise<boolean> {
+    const result = await closeSession({
+      sessionId,
+      note: hasDiscrepancy ? note.trim() : undefined,
+    });
+
+    if (!result.ok) {
+      showError(result.error.message);
+      // The rejection usually means somebody else changed the session.
+      onClosed();
+      return false;
+    }
+
+    showSuccess(
+      result.data.discrepancyCents === 0
+        ? 'Session abgeschlossen.'
+        : `Session mit Differenz ${formatSignedCents(result.data.discrepancyCents)} abgeschlossen.`,
+    );
+    onClosed();
+    return true;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="text-base font-semibold">Abschluss</h2>
+
+      <Card className="flex flex-col gap-2 px-4 py-3">
+        <CheckRow
+          ok={totals.canClose}
+          label={`Alle Spieler haben einen Stack (${totals.stackCount}/${totals.participantCount})`}
+          hint={
+            totals.canClose
+              ? undefined
+              : missingHint(participants)
+          }
+        />
+        <CheckRow
+          ok={totals.canClose && totals.discrepancy === 0}
+          neutral={!totals.canClose}
+          label={
+            totals.discrepancy === 0
+              ? `Buy-ins ${formatCents(totals.totalBuyIn)} = Stacks ${formatCents(totals.totalStack)}`
+              : `Buy-ins ${formatCents(totals.totalBuyIn)} ≠ Stacks ${formatCents(totals.totalStack)}`
+          }
+          hint={
+            totals.discrepancy === 0
+              ? undefined
+              : `Differenz ${formatSignedCents(totals.discrepancy)}: ${describeDiscrepancy(totals.discrepancy)}`
+          }
+        />
+      </Card>
+
+      {preview === null ? (
+        <p className="text-sm opacity-70">
+          Die Vorschau erscheint, sobald alle Teilnehmer einen Stack haben.
+        </p>
+      ) : (
+        <SettlementView settlement={preview} names={names} variant="preview" />
+      )}
+
+      {hasDiscrepancy ? (
+        <Card className="flex flex-col gap-2 px-4 py-3">
+          {isAdmin ? (
+            <>
+              <label htmlFor="close-note" className="text-sm font-medium">
+                Kommentar zur Differenz (Pflicht)
+              </label>
+              <textarea
+                id="close-note"
+                rows={3}
+                value={note}
+                maxLength={MAX_NOTE_LENGTH}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="Woher kommt die Differenz?"
+                className="w-full rounded-xl border border-black/15 bg-transparent p-3 text-base outline-none focus:border-emerald-500 dark:border-white/20"
+              />
+              <p className="text-xs opacity-60">
+                Mindestens {MIN_NOTE_LENGTH} Zeichen. Der Kommentar wird mit der Session
+                gespeichert.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm">
+              Nur ein Admin kann mit Differenz abschließen. Bitte zuerst Buy-ins und Stacks
+              prüfen.
+            </p>
+          )}
+        </Card>
+      ) : null}
+
+      <Button
+        size="lg"
+        variant={hasDiscrepancy ? 'danger' : 'primary'}
+        disabled={blocked !== null}
+        onClick={() => setConfirming(true)}
+      >
+        Session abschließen
+      </Button>
+      {blocked === null ? null : <p className="text-xs opacity-70">{blocked}</p>}
+
+      {confirming ? (
+        <ConfirmCloseSheet
+          sessionId={sessionId}
+          note={hasDiscrepancy ? note.trim() : null}
+          onConfirm={submit}
+          onClose={() => setConfirming(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The confirmation (WP6, step 2). It loads the server's own calculation first:
+ * what is shown here is exactly what will be frozen, and a session that changed
+ * in the meantime shows up as a different number instead of a surprise.
+ */
+function ConfirmCloseSheet({
+  sessionId,
+  note,
+  onConfirm,
+  onClose,
+}: {
+  sessionId: string;
+  note: string | null;
+  onConfirm: () => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const [state, setState] = useState<
+    { kind: 'loading' } | { kind: 'ready'; preview: SettlementPreview } | { kind: 'error'; message: string }
+  >({ kind: 'loading' });
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void previewSettlement({ sessionId }).then((result) => {
+      if (!active) return;
+      setState(
+        result.ok
+          ? { kind: 'ready', preview: result.data }
+          : { kind: 'error', message: result.error.message },
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [sessionId]);
+
+  async function confirm() {
+    if (pending) return;
+    setPending(true);
+    const done = await onConfirm();
+    setPending(false);
+    if (done) onClose();
+  }
+
+  const ready = state.kind === 'ready' ? state.preview : null;
+
+  return (
+    <Sheet open onClose={onClose} title="Session abschließen?">
+      <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto pb-2">
+        <p className="text-sm opacity-80">
+          Danach kann nichts mehr geändert werden. Nur ein Admin kann wieder öffnen.
+        </p>
+
+        {state.kind === 'loading' ? (
+          <p className="text-sm opacity-70">Abrechnung wird geprüft …</p>
+        ) : null}
+
+        {state.kind === 'error' ? (
+          <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+            {state.message}
+          </p>
+        ) : null}
+
+        {ready === null ? null : (
+          <div className="flex flex-col gap-2 rounded-xl bg-black/5 px-3 py-2 text-sm dark:bg-white/10">
+            <span>
+              {ready.participantCount} Teilnehmer · Buy-ins {formatCents(ready.totalBuyInCents)} ·
+              Stacks {formatCents(ready.totalStackCents)}
+            </span>
+            {ready.discrepancyCents === 0 ? (
+              <span>Keine Differenz.</span>
+            ) : (
+              <span className="text-red-700 dark:text-red-300">
+                Differenz {formatSignedCents(ready.discrepancyCents)} —{' '}
+                {describeDiscrepancy(ready.discrepancyCents)}
+              </span>
+            )}
+            {ready.settlement === null ? null : (
+              <span>
+                {ready.settlement.transfers.length === 0
+                  ? 'Keine Überweisungen nötig.'
+                  : `${ready.settlement.transfers.length} Überweisung(en) werden gespeichert.`}
+              </span>
+            )}
+            {note === null ? null : <span>Kommentar: „{note}“</span>}
+          </div>
+        )}
+
+        <Button
+          size="lg"
+          variant="danger"
+          disabled={pending || ready === null || !ready.canClose}
+          onClick={() => void confirm()}
+        >
+          {pending ? 'Schließt ab …' : 'Jetzt abschließen'}
+        </Button>
+        <Button size="lg" variant="secondary" onClick={onClose}>
+          Abbrechen
+        </Button>
+      </div>
+    </Sheet>
+  );
+}
+
+function CheckRow({
+  ok,
+  neutral = false,
+  label,
+  hint,
+}: {
+  ok: boolean;
+  /** The check cannot be judged yet (still players without a stack). */
+  neutral?: boolean;
+  label: string;
+  hint?: string;
+}) {
+  const tone = neutral ? 'opacity-60' : ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400';
+
+  return (
+    <div className="flex items-start gap-2 text-sm">
+      <span aria-hidden className={tone}>
+        {neutral ? '•' : ok ? '✓' : '✗'}
+      </span>
+      <span className="flex flex-col">
+        <span className={neutral ? undefined : tone}>{label}</span>
+        {hint ? <span className="text-xs opacity-70">{hint}</span> : null}
+      </span>
+    </div>
+  );
+}
+
+/** Why the close button is disabled, or `null` when it is not. */
+function blockingReason({
+  canClose,
+  hasDiscrepancy,
+  isAdmin,
+  noteIsUsable,
+}: {
+  canClose: boolean;
+  hasDiscrepancy: boolean;
+  isAdmin: boolean;
+  noteIsUsable: boolean;
+}): string | null {
+  if (!canClose) return 'Erst wenn alle Teilnehmer einen Stack haben, lässt sich abschließen.';
+  if (!hasDiscrepancy) return null;
+  if (!isAdmin) return 'Nur ein Admin kann mit Differenz abschließen.';
+  if (!noteIsUsable) return 'Bitte einen Kommentar zur Differenz eingeben.';
+  return null;
+}
+
+/** „Es fehlt noch der Stack von Ali.“ */
+function missingHint(participants: readonly DerivedParticipant[]): string | undefined {
+  const missing = participants.filter((participant) => participant.stack === null);
+  if (missing.length === 0) return undefined;
+
+  const names = missing.map((participant) => participant.name);
+  if (names.length === 1) return `Es fehlt noch der Stack von ${names[0]}.`;
+  const last = names[names.length - 1];
+  return `Es fehlen noch die Stacks von ${names.slice(0, -1).join(', ')} und ${last}.`;
+}
+
+/**
+ * The live preview in the browser. Only defined once every participant has a
+ * stack — a missing cash-out would silently count as „stack 0“ and show a loss
+ * that nobody has.
+ */
+function localPreview(participants: readonly DerivedParticipant[]): FrozenSettlement | null {
+  if (participants.length === 0) return null;
+  if (participants.some((participant) => participant.stack === null)) return null;
+
+  try {
+    return computeSettlement(
+      participants.map((participant) => ({
+        playerId: participant.playerId,
+        name: participant.name,
+        position: participant.position,
+        cashIn: participant.cashIn,
+        creditIn: participant.creditIn,
+        stack: participant.stack ?? 0,
+        payout: participant.payout,
+      })),
+    );
+  } catch {
+    // A violated precondition (e.g. a payout above the box after a race) must
+    // not blank the screen; the checklist and the server still explain it.
+    return null;
+  }
+}
