@@ -12,7 +12,7 @@
 | WP7 | Spieler-Übersicht | 642446e | FREIGEGEBEN (6 Minor → WP9-Polish) | Browser: Migration 0007 einspielen, dann prüfen | 2026-09-09 |
 | WP8 | Admin + Audit-Log | 1dfaea1 + d4933df | FREIGEGEBEN (Runde 2; F1–F3 behoben, F4 Whitelist-Audit offen) | Browser: Admin, Log, Letzter-Admin-Schutz, Filterwechsel ✔; „Mehr laden" ab 50 Zeilen offen | 2026-09-09 |
 | WP9 | PWA + Polish | 488ac03 | Gaby prüft | Lighthouse 98/100/100/100, PWA 100 (Siri); Handy-Install offen | 2026-09-09 |
-| WP10 | Deployment | – | – | – | – |
+| WP10 | Deployment | 19156c7 (Vorbereitung) | Gaby prüft | Push/Vercel/Smoke warten auf Repo-URL + Vercel-Konto | 2026-09-09 |
 
 ## Vom Auftraggeber offen
 
