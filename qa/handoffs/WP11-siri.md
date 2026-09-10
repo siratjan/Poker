@@ -122,3 +122,26 @@ Paket: Manuelle Übersteuerung der Abrechnung in der Vorschau. Commit `6f07713`.
   Worktrees dauerhaft beheben – separates Mini-Paket, nicht in WP11 umgesetzt.
 - Gaby-Tests für 0008 könnten – analog zu `wp1-close-session.gaby.test.ts` – statisch prüfen,
   dass `close_session_manual` `is_admin()` erzwingt und keine Reconciliation enthält.
+
+## Runde 2 (Nacharbeit zu Gaby-Bericht `qa/reports/WP11-gaby.md`)
+
+- **F1 (Major) behoben** in `src/components/settlement/SettlementView.tsx`: Bei `isManual`
+  zeigt die „Summe“ unter „Aus der Kasse“ jetzt die Σ der tatsächlich angezeigten `cashFromBox`
+  (`cashFromBoxTotal`) statt `cashBoxAfterPayouts`; die drei „(Differenz)“-Warnungen
+  (`unallocatedCash` / `uncoveredClaims` / `uncoveredDebts`) werden bei `isManual` komplett
+  ausgeblendet – konsistent zum bereits ausgeblendeten Rechenweg. Automatik-Pfad unverändert
+  (`isManual === false` → exakt wie WP6). Dieselbe Inkonsistenz steckte im Teilen-Text; da
+  `shareText` laut eigenem Kommentar den View „Zeile für Zeile“ spiegelt, habe ich sie dort
+  gleich mitbehoben (`src/lib/settlement/shareText.ts`: Manual → Σ `cashFromBox`, keine
+  Restfeld-Zeilen).
+- **F2 (Minor) behoben** in `supabase/migrations/0008_manual_settlement.sql`: Die Zeilen-Beträge
+  werden in der Validierung jetzt als `numeric` extrahiert und mit `<> floor(...)` auf
+  Ganzzahligkeit geprüft, statt sie über eine `integer`-Recordset-Spalte still zu runden. Ein
+  nicht-ganzzahliger `cashFromBox` (z. B. 10.5) im RPC-Direktpfad wird damit mit
+  `SETTLEMENT_MISMATCH` abgelehnt – konsistent zu Header/Transfer, die schon per Cast fehlern.
+  Der `insert` nutzt weiterhin `integer` (nach bestandener Prüfung ist der Wert garantiert
+  ganzzahlig). Migration 0008 bleibt nur Datei, muss noch eingespielt werden.
+- **F3 (Minor)**: NICHT angefasst (Planer-Anweisung). `docs/ARBEITSPAKETE.md` bewusst
+  unverändert, der WP11-Abschnitt liegt uncommittet auf `main`; der Planer merged das dort.
+- Prüfung Runde 2: `npm run check` grün (52 Dateien, 1092 Tests inkl. Gabys 23 WP11-Tests),
+  `npm run build` grün. TV1–TV12 und Automatik-Pfad unverändert.

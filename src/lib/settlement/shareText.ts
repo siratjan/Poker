@@ -57,10 +57,15 @@ function cashBlock(settlement: FrozenSettlement, names: Readonly<Record<string, 
   } else {
     lines.push(...rows);
     // „Summe = Kasse“ (WP6, step 3): the box after the early payouts, which is
-    // Σ cashFromBox plus whatever stays in the box on the next line.
-    lines.push(`Summe: ${formatCents(settlement.cashBoxAfterPayouts)}`);
+    // Σ cashFromBox plus whatever stays in the box on the next line. A manual
+    // settlement has no reconciliation, so its sum is the plain Σ cashFromBox and
+    // the leftover line is dropped — mirrors SettlementView (Gaby WP11 F1).
+    const sum = settlement.isManual
+      ? settlement.lines.reduce((acc, line) => acc + line.cashFromBox, 0)
+      : settlement.cashBoxAfterPayouts;
+    lines.push(`Summe: ${formatCents(sum)}`);
   }
-  if (settlement.unallocatedCash > 0) {
+  if (!settlement.isManual && settlement.unallocatedCash > 0) {
     lines.push(`Bleibt in der Kasse: ${formatCents(settlement.unallocatedCash)} (Differenz)`);
   }
   return lines.join('\n');
@@ -84,10 +89,12 @@ function transferBlock(
     );
   }
 
-  if (settlement.uncoveredClaims > 0) {
+  // Reconciliation leftovers are automatic-only; a manual settlement hides them
+  // (Gaby WP11 F1), consistent with SettlementView.
+  if (!settlement.isManual && settlement.uncoveredClaims > 0) {
     lines.push(`Achtung: ${formatCents(settlement.uncoveredClaims)} Anspruch ohne Deckung (Differenz)`);
   }
-  if (settlement.uncoveredDebts > 0) {
+  if (!settlement.isManual && settlement.uncoveredDebts > 0) {
     lines.push(`Achtung: ${formatCents(settlement.uncoveredDebts)} Schuld ohne Gläubiger (Differenz)`);
   }
   return lines.join('\n');

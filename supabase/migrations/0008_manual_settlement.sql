@@ -144,21 +144,26 @@ begin
   end if;
 
   -- every line is a real participant; cashFromBox >= 0; all line amounts present
+  -- and integer. The amounts are extracted as `numeric` on purpose (Gaby round 1
+  -- F2): an integer recordset column would silently ROUND a fractional JSON value
+  -- (10.5 -> 11), while `<> floor(x)` rejects it instead — consistent with the
+  -- header/transfer casts, which already error on a non-integer. Integer-cent is
+  -- the boundary, and the DB must not round it away quietly.
   if exists (
     select 1
     from jsonb_to_recordset(p_settlement -> 'lines') as l(
       "playerId"    uuid,
-      "cashIn"      integer,
-      "creditIn"    integer,
-      "stack"       integer,
-      "payout"      integer,
-      "claim"       integer,
-      "cashTier1"   integer,
-      "cashTier2"   integer,
-      "cashTier3"   integer,
-      "cashFromBox" integer,
-      "netResult"   integer,
-      "residual"    integer
+      "cashIn"      numeric,
+      "creditIn"    numeric,
+      "stack"       numeric,
+      "payout"      numeric,
+      "claim"       numeric,
+      "cashTier1"   numeric,
+      "cashTier2"   numeric,
+      "cashTier3"   numeric,
+      "cashFromBox" numeric,
+      "netResult"   numeric,
+      "residual"    numeric
     )
     left join public.session_players sp
       on sp.session_id = p_session_id and sp.player_id = l."playerId"
@@ -168,6 +173,17 @@ begin
        or l."payout" is null or l."claim" is null
        or l."cashTier1" is null or l."cashTier2" is null or l."cashTier3" is null
        or l."netResult" is null or l."residual" is null
+       or l."cashIn"      <> floor(l."cashIn")
+       or l."creditIn"    <> floor(l."creditIn")
+       or l."stack"       <> floor(l."stack")
+       or l."payout"      <> floor(l."payout")
+       or l."claim"       <> floor(l."claim")
+       or l."cashTier1"   <> floor(l."cashTier1")
+       or l."cashTier2"   <> floor(l."cashTier2")
+       or l."cashTier3"   <> floor(l."cashTier3")
+       or l."cashFromBox" <> floor(l."cashFromBox")
+       or l."netResult"   <> floor(l."netResult")
+       or l."residual"    <> floor(l."residual")
   ) then
     raise exception 'SETTLEMENT_MISMATCH' using errcode = 'P0001';
   end if;
