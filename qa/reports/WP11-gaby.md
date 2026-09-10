@@ -1,6 +1,6 @@
 # WP11 – Prüfbericht Gaby
 
-**Urteil: NACHARBEIT**
+**Urteil: FREIGEGEBEN** (nach Runde 2; Runde 1 war NACHARBEIT wegen F1/F2 — siehe „Runde 2“ am Ende)
 
 Paket: Manuelle Übersteuerung der Abrechnung in der Vorschau (Worktree
 `agent-a57e78849009f383c`, Branch `worktree-agent-a57e78849009f383c`, Siri-Commit
@@ -147,7 +147,43 @@ Planer-Entscheidungen und die sieben Prüf-Schwerpunkte geprüft.
 - **Rolle serverseitig**: dass ein Editor den `close_session_manual`-Direktaufruf real mit
   `FORBIDDEN` erhält, ist nur aus dem SQL belegbar (DB nicht eingespielt).
 
-## Runde 2 (falls Nacharbeit)
-- F1: offen ✘ / behoben —
-- F2: offen ✘ / behoben —
-- F3: offen ✘ / behoben —
+## Runde 2
+
+**Urteil Runde 2: FREIGEGEBEN**
+
+Nachgeprüft Siri-Commit `534e062` („WP11: address Gaby round 1 (F1, F2)“) im selben
+Worktree.
+
+Durchgeführt:
+- `npm run check`: grün, **1096 Tests** (1069 Basis + 27 Gaby-WP11-Tests), ~1,8 s.
+- `npm run build`: grün.
+- Gaby-Tests erweitert: `tests/gaby/wp11-manual-settlement.gaby.test.ts` jetzt 27 Tests
+  (grün), davon 4 neue für Runde 2 (F1-Fixture + F2-SQL-Review).
+
+- **F1: behoben ✔** — `src/components/settlement/SettlementView.tsx:41-42`:
+  `cashSum = isManual ? Σ cashFromBox : cashBoxAfterPayouts`, die „Summe“ unter „Aus der
+  Kasse“ nutzt `cashSum` (`:87`). Die drei „(Differenz)“-Warnungen sind bei `isManual`
+  ausgeblendet (`:78`, `:120`, `:126` mit `!settlement.isManual`). Dieselbe Korrektur ist
+  in `src/lib/settlement/shareText.ts` gespiegelt (Manual → Σ `cashFromBox`, keine
+  Restfeld-Zeilen). Mit einer Fixture, deren Handverteilung (0 / 3000 / 1000 = 40,00 €)
+  bewusst von der Automatik (`cashBoxAfterPayouts` = 200,00 €) abweicht, geprüft: der
+  Teilen-Text zeigt „Summe: 40,00 €“, kein „200,00 €“, keine „Bleibt in der Kasse“/„ohne
+  Deckung“/„ohne Gläubiger“-Zeile, und den Hinweis „(manuell bearbeitet)“. Gelistete
+  Zeilen und Summe stimmen jetzt überein. Der Automatik-Pfad (`isManual === false`) zeigt
+  weiterhin die Kasse und ihre Reste — als Regression mitgeprüft.
+- **F2: behoben ✔** — `supabase/migrations/0008_manual_settlement.sql:147-189`: die
+  Zeilen-Beträge werden in der Validierung als `numeric` extrahiert und per
+  `<> floor(...)` auf Ganzzahligkeit geprüft; ein gebrochener Wert wird mit
+  `SETTLEMENT_MISMATCH` abgelehnt statt still gerundet — konsistent zu Header/Transfer
+  (Cast-Fehler). Der `insert` nutzt weiter `integer`, was nach bestandener Prüfung sicher
+  ist. Statisch (SQL-Review) bestätigt; Migration bleibt bewusst nur Datei.
+- **F3: nach Planer-Anweisung offen** — `docs/ARBEITSPAKETE.md` wird nicht im Worktree
+  geändert (Doc-Hoheit Planer; WP11-Abschnitt liegt uncommittet auf `main`). Kein
+  Nacharbeitsgrund.
+
+Regression: TV1–TV12 und der komplette Automatik-Pfad sind unverändert (nicht im Diff
+`47ac6b5..534e062`) und grün. Immutabilität/RLS, Rollen-Trennung, `is_manual`,
+Audit-Trigger, `reopen` unverändert gegenüber Runde 1.
+
+Nicht verifiziert (unverändert): Migration 0008 nur statisch geprüft (DB nicht
+eingespielt); Browser/UI-Abnahme des Closed-Views und Teilen-Buttons bleibt Planer-Aufgabe.

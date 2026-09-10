@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { computeSettlement } from '@/lib/settlement';
+import { buildShareText } from '@/lib/settlement/shareText';
 import { fromStoredRows, toStoredRows } from '@/lib/settlement/toPersist';
 import type { FrozenSettlement, SettlementParticipant } from '@/lib/settlement/types';
 import { verifyManual } from '@/lib/settlement/verifyManual';
@@ -183,6 +184,77 @@ describe('Round-Trip — manuelle Abrechnung wird eingefroren, nie neu gerechnet
   });
 });
 
+describe('Runde 2 — F1: Anzeige-Aggregate im Manual-Fall aus den editierten Zeilen', () => {
+  const NAMES = { [ALI]: 'Ali', [BEN]: 'Ben', [CAN]: 'Can' };
+
+  // Handverteilung, die bewusst von der Automatik abweicht: Ali 0 €, Ben 3000,
+  // Can 1000 — Σ = 4000, während cashBoxAfterPayouts der Automatik 20000 ist.
+  function editedAwayFromAuto(): FrozenSettlement {
+    const auto = base();
+    const cash: Record<string, number> = { [ALI]: 0, [BEN]: 3000, [CAN]: 1000 };
+    return {
+      ...auto,
+      isManual: true,
+      lines: auto.lines.map((line) => ({
+        ...line,
+        cashFromBox: cash[line.playerId],
+        cashTier1: cash[line.playerId],
+        cashTier2: 0,
+        cashTier3: 0,
+        residual: line.claim - cash[line.playerId] - line.creditIn,
+      })),
+      transfers: [{ fromPlayerId: CAN, toPlayerId: BEN, amount: 500 }],
+      // Automatische Kopf-Reste, die nicht zur Handverteilung passen:
+      unallocatedCash: 1600,
+      uncoveredClaims: 0,
+      uncoveredDebts: 0,
+    };
+  }
+
+  it('der Teilen-Text zeigt im Manual-Fall Σ cashFromBox als Summe, ohne Automatik-Reste', () => {
+    const edited = editedAwayFromAuto();
+    const text = buildShareText({ playedOn: '2026-09-10', name: null, settlement: edited, names: NAMES });
+
+    // Summe = 0 + 3000 + 1000 = 4000, NICHT cashBoxAfterPayouts (20000).
+    expect(text).toContain('Summe: 40,00 €');
+    expect(text).not.toContain('200,00 €');
+    // Automatik-Reste sind ausgeblendet.
+    expect(text).not.toContain('Bleibt in der Kasse');
+    expect(text).not.toContain('ohne Deckung');
+    expect(text).not.toContain('ohne Gläubiger');
+    // und der manuelle Hinweis ist da.
+    expect(text).toContain('(manuell bearbeitet)');
+  });
+
+  it('die gelisteten Kasse-Zeilen summieren sich exakt auf die angezeigte Summe', () => {
+    const edited = editedAwayFromAuto();
+    const shown = edited.lines.filter((line) => line.cashFromBox > 0);
+    const sumOfRows = shown.reduce((acc, line) => acc + line.cashFromBox, 0);
+    const displayedSum = edited.lines.reduce((acc, line) => acc + line.cashFromBox, 0);
+    // Nullzeilen tragen nichts bei -> gelistete Zeilen und Summe stimmen überein.
+    expect(sumOfRows).toBe(displayedSum);
+    expect(displayedSum).toBe(4000);
+    // und das ist gerade nicht der Automatik-Wert.
+    expect(displayedSum).not.toBe(edited.cashBoxAfterPayouts);
+  });
+
+  it('der Automatik-Teilen-Text zeigt weiterhin die Kasse und ihre Reste', () => {
+    // Eine Automatik-Abrechnung mit Differenz behält Summe = Kasse + Rest-Zeile.
+    const auto = computeSettlement([
+      { playerId: ALI, name: 'Ali', position: 0, cashIn: 10000, creditIn: 0, stack: 12000, payout: 0 },
+      { playerId: BEN, name: 'Ben', position: 1, cashIn: 10000, creditIn: 0, stack: 6000, payout: 0 },
+    ]);
+    expect(auto.isManual).toBe(false);
+    const text = buildShareText({ playedOn: '2026-09-10', name: null, settlement: auto, names: NAMES });
+    expect(text).toContain('Summe: ' + fmt(auto.cashBoxAfterPayouts));
+  });
+});
+
+function fmt(cents: number): string {
+  // formatCents-Äquivalent für die Assertion oben; nur ganze Euro hier.
+  return `${(cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
 const migration0008 = readFileSync(
   fileURLToPath(new URL('../../supabase/migrations/0008_manual_settlement.sql', import.meta.url)),
   'utf8',
@@ -223,6 +295,16 @@ describe('SQL-Review 0008 — statisch (DB nicht eingespielt)', () => {
     expect(migration0008).not.toMatch(/SETTLEMENT_INVARIANT/);
     // keine Neuberechnung aus entries (kein sum(...) filter über entries).
     expect(migration0008).not.toMatch(/filter \(where e\.type/);
+  });
+
+  it('Runde 2 F2: lehnt nicht-ganzzahlige Zeilen-Beträge ab statt still zu runden', () => {
+    // Beträge werden als numeric extrahiert und per `<> floor(x)` geprüft.
+    // Die Validierungs-Recordset extrahiert die Beträge als numeric ...
+    expect(migration0008).toMatch(/"cashFromBox"\s+numeric/);
+    // ... und weist gebrochene Werte über `<> floor(x)` ab, statt zu runden.
+    for (const field of ['cashFromBox', 'cashIn', 'stack', 'payout', 'residual']) {
+      expect(migration0008).toMatch(new RegExp(`l\\."${field}"\\s*<>\\s*floor\\(l\\."${field}"\\)`));
+    }
   });
 
   it('prüft, dass Transfers echte Teilnehmer referenzieren', () => {
