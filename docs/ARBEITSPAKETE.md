@@ -448,3 +448,53 @@ WP3 kann direkt nach WP0 parallel zu WP1/WP2 laufen.
 
 - `docs/BETRIEB.md` auf Vollständigkeit: kann eine fremde Person damit einen neuen Editor freischalten und eine Migration einspielen?
 - Keine Secrets im Repo (`git log -p | grep -i secret` etc.), `.env.example` aktuell.
+
+---
+
+## WP11 – Manuelle Übersteuerung der Abrechnung in der Vorschau
+
+**Ziel**: In der Live-Vorschau einer offenen Session kann ein Admin die vom Algorithmus vorgeschlagenen „Aus der Kasse“-Auszahlungen **und** die „Überweisungen“ (Spieler→Spieler) frei überschreiben – beliebige Beträge und Paarungen, ohne Stimmigkeitsprüfung gegen Buy-ins/Stacks. Beim Abschluss wird die **manuell bearbeitete** Abrechnung eingefroren gespeichert. Abgeschlossene Sessions bleiben unveränderlich; nur der Vorschau-Zustand ist editierbar.
+
+**Planer-Entscheidung (Grundlage)**: Dieses Paket durchbricht bewusst die Kern-Garantie aus `docs/SETTLEMENT.md` („Abrechnung ist deterministisch reproduzierbar und serverseitig verifiziert“). Der Bruch ist **ausdrücklich und auditierbar**, nie heimlich. Freiheitsgrad: frei wählbare Beträge/Paarungen, aber Grundintegrität bleibt (Überweisungsbetrag > 0, keine Selbst-Überweisung, nur real teilnehmende Spieler, Integer-Cent). Die DB-Check-Constraints auf `settlement_transfers` bleiben unangetastet.
+
+**Abhängigkeiten**: WP6.
+
+**Implementation Plan**
+
+1. **Doc (Planer)**: `docs/SPEC.md` und `docs/SETTLEMENT.md` um den Abschnitt „Manuelle Übersteuerung in der Vorschau“ ergänzen: wann erlaubt (nur offene Session, nur Admin), was frei ist, was invariant bleibt (Grundintegrität), und dass die gespeicherte Abrechnung dann als `is_manual` markiert und nicht mehr aus den Entries reproduzierbar ist. TV1–TV12 bleiben unverändert und gelten weiter für den **Automatik**-Pfad.
+2. **DB-Migration `supabase/migrations/0008_manual_settlement.sql`**:
+   - Spalte `settlements.is_manual boolean not null default false`.
+   - Neuer, expliziter Schreibpfad im Abschluss: entweder `close_session` um `p_manual boolean` erweitern **oder** eine getrennte RPC `close_session_manual(p_session_id, p_settlement, p_note)`. Im Manual-Pfad entfällt der Zeilen-für-Zeilen-Neurechen-Abgleich aus den Entries (`0002:790-837`) und die algorithmischen Invarianten (Stufen/Deckung, `0002:839-931`); es bleiben: Referenz-Integrität (Spieler nehmen an der Session teil, `0002:987-996`), `amount_cents > 0`, `from != to`, Integer, und die Session-Status-/Existenz-Guards. Header-`*_cents` in `settlements` werden aus dem übergebenen `p_settlement` übernommen, nicht neu gerechnet.
+   - Audit-Trigger auf `settlement_lines` und `settlement_transfers` ergänzen (heute nicht auditiert), damit die manuellen Werte im Log erscheinen; alternativ die Overrides kompakt in `settlements` (JSONB) mitschreiben, das `audit_settlements` bereits erfasst. Entscheidung im Handoff begründen.
+   - Manual-Abschluss nur für Admin (SECURITY DEFINER prüft Rolle wie `close_session`); `p_note` Pflicht (Begründung der Übersteuerung).
+3. **`src/actions/close.ts`**: neue Action `closeSessionManual({ sessionId, settlement, note })` (oder `closeSession` um `manual`-Flag erweitern). `requireAdmin`. Die manuell edierte Abrechnung wird durchgereicht (**nicht** neu gerechnet). `verifySettlement` wird im Manual-Modus durch eine schlanke Prüfung ersetzt (nur Grundintegrität, s. o.). Fehlercodes deutsch übersetzen.
+4. **`src/lib/settlement/verify.ts`** (oder neues `verifyManual.ts`): laxe Validierung für den Override – Integer-Cent, alle Transfer-Beträge > 0, `from != to`, alle Spieler-IDs sind Teilnehmer, cash-payouts ≥ 0. Keine Prüfung gegen Buy-ins/Stacks/Netto.
+5. **`src/lib/settlement/toPersist.ts`**: `SettlementPayload` um `isManual` erweitern; Round-Trip (`fromStoredRows`) muss das Flag mitführen.
+6. **UI – Editor in der Vorschau** (`src/components/sessions/CloseSessionPanel.tsx` + neue `src/components/settlement/SettlementEditor.tsx`, nur `open` + Admin):
+   - Umschalter „Automatisch / Manuell bearbeiten“. Standard bleibt Automatik.
+   - Manuell: editierbare „Aus der Kasse“-Liste (Betrag je Spieler) und editierbare Überweisungsliste (Zeile hinzufügen/entfernen, Von/An per Auswahl aus den Teilnehmern, Betrag). Betragseingabe über das bestehende Muster `AmountField` / `parseEuroInput` (Integer-Cent).
+   - Live-Summen anzeigen (Kasse-Summe, Überweisungs-Summe), aber **nicht** blockieren. Neutraler Hinweis, wenn Summen nicht zum Ergebnis passen („frei bearbeitet – nicht geprüft“), kein Fehler.
+   - Bestätigungs-Sheet beim Abschluss: „Manuell bearbeitete Abrechnung. Wird unverändert gespeichert und kann nur von einem Admin durch Wiederöffnen zurückgesetzt werden.“ Pflichtfeld Begründung.
+7. **Anzeige** (`src/components/settlement/SettlementView.tsx`): bei `is_manual` ein deutlicher, ruhiger Hinweis „Manuell bearbeitet“ in der eingefrorenen Ansicht (und im Kopf der abgeschlossenen Session). `SettlementView` bleibt read-only für `final`.
+8. **Share-Text** (`src/lib/settlement/shareText.ts`): unverändertes Format, aber Zeile „(manuell bearbeitet)“ ergänzen, wenn `isManual`.
+9. **Tests**: `src/actions/close.test.ts` (Manual-Pfad reicht Zahlen durch, Automatik unverändert), `verifyManual.test.ts` (Grundintegrität greift, Reconciliation nicht), `toPersist.test.ts` (Flag verlustfrei). TV1–TV12 in `settlement.test.ts` bleiben grün und unangetastet.
+10. Commit `WP11: manual settlement override in preview`.
+
+**DoD**
+
+- Automatik-Pfad verhält sich exakt wie in WP6 (TV1–TV12 grün); Manual ist ein bewusst gewählter Nebenweg, kein Ersatz.
+- Als Admin lassen sich in der offenen Vorschau Kasse-Beträge und Überweisungen (Beträge + Paarungen) frei setzen; der Abschluss speichert genau diese Werte.
+- Abgeschlossene Session zeigt die manuell gesetzten Werte aus der DB (nie neu berechnet) mit „Manuell bearbeitet“-Hinweis und Pflicht-Begründung.
+- Manuelle Werte erscheinen im Audit-Log; `is_manual` ist gesetzt.
+- Grundintegrität serverseitig erzwungen (Betrag > 0, kein Selbst-Transfer, echte Teilnehmer, Integer-Cent); keine Reconciliation-Prüfung.
+- Wieder öffnen löscht die (manuelle) Abrechnung wie gehabt.
+- `npm run check` + `npm run build` grün; Übergabe in `qa/handoffs/WP11-siri.md`.
+
+**Testauftrag Gaby**
+
+- Nachweis, dass der **Automatik**-Pfad unverändert ist (TV1–TV12, `verifySettlement`, RPC-Neurechen weiterhin scharf für den Nicht-Manual-Fall).
+- Manual-Abschluss mit absichtlich „unstimmigen“ Zahlen (Kasse ≠ Auszahlungen, Transfer-Summe ≠ Residuen) wird gespeichert und exakt so wieder angezeigt – aus der DB, nicht neu gerechnet (Test mit Fixture).
+- Grundintegrität greift: Transfer mit Betrag 0/negativ, Selbst-Transfer, Nicht-Teilnehmer, Nicht-Integer → serverseitig abgelehnt (RPC/Action, nicht nur UI).
+- Rolle: Editor kann **nicht** manuell übersteuern (nur Admin); UI-Ausblendung + serverseitige Sperre getrennt geprüft.
+- Audit: manuelle Werte und `is_manual` sind im Log nachvollziehbar; `reopen` entfernt die Abrechnung.
+- Race/Immutabilität: kein Schreibpfad auf eine abgeschlossene Session; `settlement_lines`/`settlement_transfers` bleiben ohne RPC unbeschreibbar (RLS).
