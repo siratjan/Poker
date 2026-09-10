@@ -34,12 +34,27 @@ export function SettlementView({
 }) {
   const cashRows = settlement.lines.filter((line) => line.cashFromBox > 0);
   const transferTotal = settlement.transfers.reduce((acc, transfer) => acc + transfer.amount, 0);
+  // A hand-edited settlement (WP11, Gaby round 1 F1) has no reconciliation: its
+  // "Summe" is the sum of the amounts actually shown, and the automatic
+  // reconciliation leftovers (unallocated / uncovered) do not apply, so they are
+  // hidden — consistent with the already-hidden „Rechenweg“. The automatic path
+  // keeps showing the cash box after payouts (which differs from Σ cashFromBox
+  // exactly by `unallocatedCash`, spelled out below).
+  const cashFromBoxTotal = settlement.lines.reduce((acc, line) => acc + line.cashFromBox, 0);
+  const cashSum = settlement.isManual ? cashFromBoxTotal : settlement.cashBoxAfterPayouts;
 
   return (
     <div className="flex flex-col gap-4">
       {variant === 'preview' ? (
         <p className="rounded-xl bg-amber-500/15 px-3 py-2 text-xs font-medium">
           Vorschau — so würde die Abrechnung gespeichert.
+        </p>
+      ) : null}
+
+      {settlement.isManual ? (
+        <p className="rounded-xl bg-black/5 px-3 py-2 text-xs font-medium dark:bg-white/10">
+          Manuell bearbeitet — diese Abrechnung wurde von einem Admin von Hand gesetzt und nicht
+          automatisch berechnet.
         </p>
       ) : null}
 
@@ -60,15 +75,16 @@ export function SettlementView({
               ))}
             </ul>
             {/*
-              „Summe = Kasse“ (WP6, step 3): the sum line is the cash box after
-              the early payouts, not Σ cashFromBox. The two differ exactly by
-              `unallocatedCash`, which is spelled out on the line below — so the
-              reader can add the rows up and land on the box (Gaby WP6, F3).
+              „Summe = Kasse“ (WP6, step 3): in the automatic path the sum line
+              is the cash box after the early payouts, not Σ cashFromBox. The two
+              differ exactly by `unallocatedCash`, spelled out below — so the
+              reader can add the rows up and land on the box (Gaby WP6, F3). For a
+              manual settlement it is the plain Σ cashFromBox (Gaby WP11 F1).
             */}
-            <SumRow label="Summe" value={formatCents(settlement.cashBoxAfterPayouts)} />
+            <SumRow label="Summe" value={formatCents(cashSum)} />
           </>
         )}
-        {settlement.unallocatedCash > 0 ? (
+        {!settlement.isManual && settlement.unallocatedCash > 0 ? (
           <Warning>
             Bleibt in der Kasse: {formatCents(settlement.unallocatedCash)} (Differenz)
           </Warning>
@@ -101,12 +117,12 @@ export function SettlementView({
             <SumRow label="Summe" value={formatCents(transferTotal)} />
           </>
         )}
-        {settlement.uncoveredClaims > 0 ? (
+        {!settlement.isManual && settlement.uncoveredClaims > 0 ? (
           <Warning>
             {formatCents(settlement.uncoveredClaims)} Anspruch ohne Deckung (Differenz)
           </Warning>
         ) : null}
-        {settlement.uncoveredDebts > 0 ? (
+        {!settlement.isManual && settlement.uncoveredDebts > 0 ? (
           <Warning>
             {formatCents(settlement.uncoveredDebts)} Schuld ohne Gläubiger (Differenz)
           </Warning>
@@ -173,7 +189,9 @@ export function SettlementView({
         )}
       </Block>
 
-      <CalculationDetails settlement={settlement} names={names} />
+      {/* The „Rechenweg“ explains the three automatic stages; for a hand-edited
+          settlement those stages do not apply, so it is hidden (WP11). */}
+      {settlement.isManual ? null : <CalculationDetails settlement={settlement} names={names} />}
     </div>
   );
 }

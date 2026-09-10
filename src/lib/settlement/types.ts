@@ -94,6 +94,13 @@ export type SettlementResult = {
    * (`docs/SETTLEMENT.md`, step 5).
    */
   uncoveredDebts: number;
+  /**
+   * `true` when an admin overrode the settlement by hand in the preview
+   * (docs/SPEC.md §6.1, docs/ARBEITSPAKETE.md WP11). The automatic algorithm
+   * always produces `false`; a manually edited settlement is frozen as given
+   * and is no longer reproducible from the entries.
+   */
+  isManual: boolean;
 };
 
 /**

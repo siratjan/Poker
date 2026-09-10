@@ -1,9 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { closeSession, previewSettlement, type SettlementPreview } from '@/actions/close';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  closeSession,
+  closeSessionManual,
+  previewSettlement,
+  type SettlementPreview,
+} from '@/actions/close';
 import { useWritesBlocked } from '@/components/app/ConnectionProvider';
 import { OfflineNote } from '@/components/app/OfflineNote';
+import { SettlementEditor } from '@/components/settlement/SettlementEditor';
 import { SettlementView } from '@/components/settlement/SettlementView';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -46,9 +52,15 @@ export function CloseSessionPanel({
   const [note, setNote] = useState('');
   const [confirming, setConfirming] = useState(false);
 
+  // Manual override (WP11, docs/SPEC.md §6.1): admin only, off by default.
+  const [manualMode, setManualMode] = useState(false);
+  const [manualSettlement, setManualSettlement] = useState<FrozenSettlement | null>(null);
+  const [manualConfirming, setManualConfirming] = useState(false);
+
   const preview = localPreview(participants);
   const hasDiscrepancy = totals.canClose && totals.discrepancy !== 0;
   const noteIsUsable = note.trim().length >= MIN_NOTE_LENGTH;
+  const canManual = isAdmin && preview !== null;
 
   const blocked = blockingReason({
     canClose: totals.canClose,
@@ -56,6 +68,29 @@ export function CloseSessionPanel({
     isAdmin,
     noteIsUsable,
   });
+
+  const onEditorChange = useCallback((settlement: FrozenSettlement | null) => {
+    setManualSettlement(settlement);
+  }, []);
+
+  async function submitManual(manualNote: string): Promise<boolean> {
+    if (manualSettlement === null) return false;
+    const result = await closeSessionManual({
+      sessionId,
+      note: manualNote.trim(),
+      settlement: manualSettlement,
+    });
+
+    if (!result.ok) {
+      showError(result.error.message);
+      onClosed();
+      return false;
+    }
+
+    showSuccess('Session mit manuell bearbeiteter Abrechnung abgeschlossen.');
+    onClosed();
+    return true;
+  }
 
   async function submit(): Promise<boolean> {
     const result = await closeSession({
@@ -109,14 +144,101 @@ export function CloseSessionPanel({
         />
       </Card>
 
+      {canManual ? (
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Abrechnungs-Modus">
+          <Button
+            size="md"
+            variant={manualMode ? 'secondary' : 'primary'}
+            aria-pressed={!manualMode}
+            onClick={() => setManualMode(false)}
+          >
+            Automatisch
+          </Button>
+          <Button
+            size="md"
+            variant={manualMode ? 'primary' : 'secondary'}
+            aria-pressed={manualMode}
+            onClick={() => setManualMode(true)}
+          >
+            Manuell bearbeiten
+          </Button>
+        </div>
+      ) : null}
+
       {preview === null ? (
         <p className="text-sm opacity-70">
           Die Vorschau erscheint, sobald alle Teilnehmer einen Stack haben.
         </p>
+      ) : manualMode && canManual ? (
+        <SettlementEditor base={preview} names={names} onChange={onEditorChange} />
       ) : (
         <SettlementView settlement={preview} names={names} variant="preview" />
       )}
 
+      {manualMode && canManual ? (
+        <>
+          <Button
+            size="lg"
+            variant="danger"
+            disabled={manualSettlement === null}
+            onClick={() => setManualConfirming(true)}
+          >
+            Manuell abschließen
+          </Button>
+          {manualSettlement === null ? (
+            <p className="text-xs opacity-70">
+              Bitte fülle alle Beträge aus und wähle für jede Überweisung zwei Spieler.
+            </p>
+          ) : null}
+
+          {manualConfirming ? (
+            <ManualConfirmSheet
+              onConfirm={submitManual}
+              onClose={() => setManualConfirming(false)}
+            />
+          ) : null}
+        </>
+      ) : (
+        <AutomaticClose
+          hasDiscrepancy={hasDiscrepancy}
+          isAdmin={isAdmin}
+          note={note}
+          setNote={setNote}
+          blocked={blocked}
+          onOpenConfirm={() => setConfirming(true)}
+        />
+      )}
+
+      {confirming ? (
+        <ConfirmCloseSheet
+          sessionId={sessionId}
+          note={hasDiscrepancy ? note.trim() : null}
+          onConfirm={submit}
+          onClose={() => setConfirming(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** The automatic close controls (unchanged behaviour from WP6). */
+function AutomaticClose({
+  hasDiscrepancy,
+  isAdmin,
+  note,
+  setNote,
+  blocked,
+  onOpenConfirm,
+}: {
+  hasDiscrepancy: boolean;
+  isAdmin: boolean;
+  note: string;
+  setNote: (value: string) => void;
+  blocked: string | null;
+  onOpenConfirm: () => void;
+}) {
+  return (
+    <>
       {hasDiscrepancy ? (
         <Card className="flex flex-col gap-2 px-4 py-3">
           {isAdmin ? (
@@ -151,21 +273,12 @@ export function CloseSessionPanel({
         size="lg"
         variant={hasDiscrepancy ? 'danger' : 'primary'}
         disabled={blocked !== null}
-        onClick={() => setConfirming(true)}
+        onClick={onOpenConfirm}
       >
         Session abschließen
       </Button>
       {blocked === null ? null : <p className="text-xs opacity-70">{blocked}</p>}
-
-      {confirming ? (
-        <ConfirmCloseSheet
-          sessionId={sessionId}
-          note={hasDiscrepancy ? note.trim() : null}
-          onConfirm={submit}
-          onClose={() => setConfirming(false)}
-        />
-      ) : null}
-    </div>
+    </>
   );
 }
 
@@ -265,6 +378,72 @@ function ConfirmCloseSheet({
           onClick={() => void confirm()}
         >
           {pending ? 'Schließt ab …' : 'Jetzt abschließen'}
+        </Button>
+        <Button size="lg" variant="secondary" onClick={onClose}>
+          Abbrechen
+        </Button>
+        <OfflineNote />
+      </div>
+    </Sheet>
+  );
+}
+
+/**
+ * Confirmation for a manual override (WP11, step 6). The justification is
+ * mandatory here; the warning spells out that the numbers are stored as edited
+ * and can only be reset by an admin reopening the session.
+ */
+function ManualConfirmSheet({
+  onConfirm,
+  onClose,
+}: {
+  onConfirm: (note: string) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const [note, setNote] = useState('');
+  const [pending, setPending] = useState(false);
+  const offline = useWritesBlocked();
+
+  const usable = note.trim().length >= MIN_NOTE_LENGTH;
+
+  async function confirm() {
+    if (!usable || pending || offline) return;
+    setPending(true);
+    const done = await onConfirm(note);
+    setPending(false);
+    if (done) onClose();
+  }
+
+  return (
+    <Sheet open onClose={onClose} title="Manuell bearbeitete Abrechnung speichern?">
+      <div className="flex flex-col gap-3 pb-2">
+        <p className="rounded-xl bg-amber-500/15 px-3 py-2 text-sm">
+          Manuell bearbeitete Abrechnung. Wird unverändert gespeichert und kann nur von einem
+          Admin durch Wiederöffnen zurückgesetzt werden.
+        </p>
+        <label htmlFor="manual-note" className="text-sm font-medium">
+          Begründung (Pflicht)
+        </label>
+        <textarea
+          id="manual-note"
+          rows={3}
+          autoFocus
+          value={note}
+          maxLength={MAX_NOTE_LENGTH}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Warum wird die Abrechnung von Hand gesetzt?"
+          className="w-full rounded-xl border border-black/15 bg-transparent p-3 text-base outline-none focus:border-emerald-500 dark:border-white/20"
+        />
+        <p className="text-xs opacity-60">
+          Mindestens {MIN_NOTE_LENGTH} Zeichen. Die Begründung steht im Audit-Log.
+        </p>
+        <Button
+          size="lg"
+          variant="danger"
+          disabled={!usable || pending || offline}
+          onClick={() => void confirm()}
+        >
+          {pending ? 'Speichert …' : 'Manuell abschließen'}
         </Button>
         <Button size="lg" variant="secondary" onClick={onClose}>
           Abbrechen

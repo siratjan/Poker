@@ -142,6 +142,7 @@ describe('Result <-> RPC JSON', () => {
         'cashBoxAfterPayouts',
         'cashBoxStart',
         'discrepancy',
+        'isManual',
         'lines',
         'totalBuyIn',
         'totalStack',
@@ -260,5 +261,35 @@ describe('Result <-> stored rows', () => {
     rows.settlement.algorithm_version = 99;
 
     expect(fromStoredRows(rows).algorithmVersion).toBe(99);
+  });
+
+  it('carries the automatic isManual = false through both round trips (WP11)', () => {
+    const [, result] = CASES[1];
+    expect(result.isManual).toBe(false);
+
+    expect(fromSettlementPayload(toSettlementPayload(result)).isManual).toBe(false);
+    expect(fromStoredRows(toStoredRows(result, SESSION, positions)).isManual).toBe(false);
+    expect(toStoredRows(result, SESSION, positions).settlement.is_manual).toBe(false);
+  });
+
+  it('carries a manual isManual = true through both round trips (WP11)', () => {
+    const [, base] = CASES[1];
+    // A hand-edited settlement: same shape, but flagged manual and with an
+    // unreconciled cash amount and transfer — exactly what WP11 must preserve.
+    const manual: SettlementResult = {
+      ...base,
+      isManual: true,
+      lines: base.lines.map((line) => ({ ...line, cashFromBox: 12345 })),
+      transfers: [{ fromPlayerId: base.lines[1].playerId, toPlayerId: base.lines[0].playerId, amount: 777 }],
+    };
+
+    const viaPayload = fromSettlementPayload(toSettlementPayload(manual));
+    expect(viaPayload.isManual).toBe(true);
+    expect(viaPayload.lines[0].cashFromBox).toBe(12345);
+    expect(viaPayload.transfers).toEqual(manual.transfers);
+
+    const rows = toStoredRows(manual, SESSION, positions);
+    expect(rows.settlement.is_manual).toBe(true);
+    expect(fromStoredRows(rows)).toEqual(manual);
   });
 });

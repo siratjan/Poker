@@ -516,6 +516,9 @@ function ClosedNotice({ detail }: { detail: SessionDetail }) {
           Differenz {formatSignedCents(session.discrepancyCents)}
         </span>
       ) : null}
+      {detail.settlement?.isManual ? (
+        <span className="font-medium">Abrechnung manuell bearbeitet</span>
+      ) : null}
       {session.closeNote ? (
         <span className="whitespace-pre-line opacity-80">{session.closeNote}</span>
       ) : null}

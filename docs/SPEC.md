@@ -83,6 +83,32 @@ Kernregel des Auftraggebers: **Bargeld geht immer zuerst an Bar-Zahler.**
 
 „Bar-Zahler“ ist, wer in dieser Session mindestens einen `cash`-Buy-in hat (auch wenn er zusätzlich auf Liste gekauft hat).
 
+### 6.1 Manuelle Übersteuerung in der Vorschau (v1.1)
+
+In seltenen Fällen weicht die tatsächliche Bar-Verteilung am Tisch von dem ab, was der
+Automatik-Algorithmus vorschlägt. Für diese Fälle darf ein **Admin** die Abrechnung in der
+**Live-Vorschau einer offenen Session** von Hand übersteuern. Diese Möglichkeit durchbricht
+bewusst die Garantie „Abrechnung ist deterministisch reproduzierbar“; der Bruch ist ausdrücklich,
+auditierbar und nie heimlich.
+
+- **Wann erlaubt**: nur in einer **offenen** Session und nur für einen **Admin**. Ein Editor
+  sieht die manuelle Bearbeitung nicht, und die Datenbank verweigert sie ihm zusätzlich. Der
+  Automatik-Pfad (jeder Editor, ohne Differenz) bleibt unverändert.
+- **Was frei ist**: die „Aus der Kasse“-Auszahlungen (Betrag je Spieler) **und** die
+  Überweisungen (Von / An / Betrag). Beträge und Paarungen sind frei wählbar; es gibt **keine**
+  Stimmigkeitsprüfung gegen Buy-ins, Stacks oder Netto-Ergebnis.
+- **Was invariant bleibt (Grundintegrität, serverseitig erzwungen)**: Überweisungsbetrag > 0,
+  keine Selbst-Überweisung, nur real teilnehmende Spieler, alle Beträge Integer-Cent,
+  „Aus der Kasse“-Beträge ≥ 0. Die DB-Check-Constraints auf `settlement_transfers` bleiben aktiv.
+- **Beim Abschluss**: es ist eine **Begründung** (`note`) Pflicht. Die manuell bearbeitete
+  Abrechnung wird unverändert eingefroren gespeichert, mit `settlements.is_manual = true`
+  markiert und ist danach **nicht mehr aus den Einträgen reproduzierbar**. Sie wird – wie jede
+  abgeschlossene Abrechnung – aus der Datenbank angezeigt, nie neu berechnet.
+- **Sichtbarkeit**: die abgeschlossene Ansicht, der Kopf der Session und der Teilen-Text weisen
+  ruhig auf „Manuell bearbeitet“ hin. Die manuellen Werte stehen im Audit-Log.
+- **Wieder öffnen**: löscht die (manuelle) Abrechnung wie gehabt; beim nächsten Abschluss wird
+  wieder der Automatik-Vorschlag angeboten.
+
 ## 7. Ansichten
 
 | Ansicht | Inhalt |
