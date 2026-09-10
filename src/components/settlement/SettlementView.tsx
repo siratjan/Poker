@@ -147,9 +147,6 @@ export function SettlementView({
                 <th scope="col" className="py-1 px-2 text-right font-medium">
                   Stack
                 </th>
-                <th scope="col" className="py-1 px-2 text-right font-medium">
-                  Ausgez.
-                </th>
                 <th scope="col" className="py-1 pl-2 text-right font-medium">
                   +/−
                 </th>
@@ -168,9 +165,6 @@ export function SettlementView({
                     {formatCents(line.creditIn)}
                   </td>
                   <td className="py-1.5 px-2 text-right tabular-nums">{formatCents(line.stack)}</td>
-                  <td className="py-1.5 px-2 text-right tabular-nums">
-                    {formatCents(line.payout)}
-                  </td>
                   <td
                     className={`py-1.5 pl-2 text-right font-semibold tabular-nums ${resultColor(line.netResult)}`}
                   >
