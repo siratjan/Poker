@@ -475,6 +475,7 @@ export type Database = {
           unallocated_cash_cents: number;
           uncovered_claims_cents: number;
           uncovered_debts_cents: number;
+          is_manual: boolean;
         };
         Insert: {
           session_id: string;
@@ -489,6 +490,7 @@ export type Database = {
           unallocated_cash_cents: number;
           uncovered_claims_cents: number;
           uncovered_debts_cents: number;
+          is_manual?: boolean;
         };
         Update: {
           session_id?: string;
@@ -503,6 +505,7 @@ export type Database = {
           unallocated_cash_cents?: number;
           uncovered_claims_cents?: number;
           uncovered_debts_cents?: number;
+          is_manual?: boolean;
         };
         Relationships: [
           {
@@ -577,6 +580,15 @@ export type Database = {
           p_session_id: string;
           p_settlement: Json;
           p_note?: string | null;
+        };
+        Returns: undefined;
+      };
+      // Manual settlement override (WP11, supabase/migrations/0008_manual_settlement.sql).
+      close_session_manual: {
+        Args: {
+          p_session_id: string;
+          p_settlement: Json;
+          p_note: string;
         };
         Returns: undefined;
       };

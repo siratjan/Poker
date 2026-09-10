@@ -174,6 +174,27 @@ kommentieren.
 8. Kein Transfer von einem Spieler an sich selbst; keine Transfers mit Betrag 0.
 9. `Σ transfers.amount ≤ min(Σ positive residual, Σ |negative residual|)`.
 
+## Manuelle Übersteuerung in der Vorschau (v1.1)
+
+Der oben beschriebene Algorithmus ist der **Automatik-Pfad**. Die Testfälle TV1–TV12 und alle
+Invarianten gelten unverändert für diesen Pfad und bleiben scharf (Server-Action `closeSession`,
+`verifySettlement`, RPC `close_session` rechnen weiter dreifach nach).
+
+Daneben gibt es einen bewusst gewählten **Manual-Pfad** (`docs/SPEC.md` §6.1): Ein Admin darf in
+der Live-Vorschau einer offenen Session die „Aus der Kasse“-Beträge und die Überweisungen frei
+setzen. Für diesen Pfad gilt:
+
+- Es findet **keine** Reconciliation gegen `entries` statt und **keine** der algorithmischen
+  Invarianten (Stufen 1–3, Deckung, „Bargeld zuerst“). Die Beträge werden unverändert
+  eingefroren gespeichert und mit `settlements.is_manual = true` markiert.
+- Serverseitig erzwungen bleibt nur die **Grundintegrität**: alle Beträge Integer-Cent,
+  jeder Überweisungsbetrag > 0, keine Selbst-Überweisung, „Aus der Kasse“-Beträge ≥ 0, alle
+  beteiligten Spieler sind reale Teilnehmer der Session, genau eine Zeile je Teilnehmer.
+- Eine so gespeicherte Abrechnung ist **nicht** aus den Einträgen reproduzierbar. Sie wird aus
+  der Datenbank angezeigt, nie neu berechnet.
+
+TV1–TV12 sind **nicht** auf den Manual-Pfad anzuwenden; sie definieren allein die Automatik.
+
 ## Testfälle (Pflicht – Beträge in Euro, im Test in Cent)
 
 ### TV1 – Reine Bar-Runde (Beispiel des Auftraggebers)

@@ -97,6 +97,8 @@ export function computeSettlement(participants: SettlementInput): SettlementResu
     unallocatedCash: box,
     uncoveredClaims,
     uncoveredDebts,
+    // The automatic path is never a manual override (docs/SPEC.md §6.1).
+    isManual: false,
   };
 }
 

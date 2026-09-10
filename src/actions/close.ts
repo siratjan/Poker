@@ -9,9 +9,11 @@ import { messageForDbErrorCode, translateDbError } from '@/lib/errors/de';
 import { computeSettlement, SettlementError } from '@/lib/settlement';
 import { toSettlementPayload } from '@/lib/settlement/toPersist';
 import { verifySettlement } from '@/lib/settlement/verify';
+import { verifyManual } from '@/lib/settlement/verifyManual';
 import type { FrozenSettlement, SettlementParticipant } from '@/lib/settlement/types';
 import { createClient } from '@/lib/supabase/server';
 import {
+  closeSessionManualSchema,
   closeSessionSchema,
   MIN_NOTE_LENGTH,
   previewSettlementSchema,
@@ -41,6 +43,9 @@ import { parseInput } from '@/lib/validation/parse';
 const NO_PARTICIPANTS = 'Diese Session hat noch keine Teilnehmer.';
 const NOT_COMPUTABLE =
   'Die Abrechnung lässt sich mit diesen Daten nicht berechnen. Bitte prüfe Stacks und Auszahlungen.';
+const MANUAL_INVALID =
+  'Die manuell bearbeitete Abrechnung ist nicht zulässig. Bitte prüfe Beträge und Paarungen: ' +
+  'Überweisungen größer als 0 €, keine Selbst-Überweisung, nur echte Teilnehmer.';
 
 /** One participant as `settlement_input` returns him. */
 type SettlementInputRow = {
@@ -135,6 +140,56 @@ export async function closeSession(
 
     revalidateSession(sessionId);
     return { discrepancyCents: settlement.discrepancy };
+  });
+}
+
+/**
+ * Closes a session with a **hand-edited** settlement (docs/ARBEITSPAKETE.md
+ * WP11, docs/SPEC.md §6.1). Admin only, `note` mandatory.
+ *
+ * This is the deliberate side path that breaks the „always computed on the
+ * server“ rule of {@link closeSession}: the numbers the admin entered are passed
+ * through unchanged. It never touches `close_session`; it calls
+ * `close_session_manual`, which recomputes **nothing** and only enforces basic
+ * integrity. `verifyManual` mirrors that integrity here for a readable message,
+ * but the RPC stays the boundary.
+ */
+export async function closeSessionManual(
+  input: unknown,
+): Promise<ActionResult<{ discrepancyCents: number }>> {
+  return actionResult(async () => {
+    await requireAdmin();
+    const { sessionId, note, settlement } = parseInput(closeSessionManualSchema, input);
+
+    // The participants ground the override: only real, fully cashed-out players.
+    const rows = await loadSettlementInput(sessionId);
+    if (rows.length === 0) throw new AppError('NO_PARTICIPANTS', NO_PARTICIPANTS);
+
+    const missing = rows.filter((row) => !row.has_cash_out);
+    if (missing.length > 0) {
+      throw new AppError('MISSING_CASH_OUT', missingCashOutMessage(missing));
+    }
+
+    const participantIds = new Set(rows.map((row) => row.player_id));
+    const manual: FrozenSettlement = { ...settlement, isManual: true };
+
+    // Basic integrity (SPEC §6.1). No reconciliation against buy-ins/stacks.
+    const problems = verifyManual(manual, participantIds);
+    if (problems.length > 0) {
+      console.error('[close] manual settlement failed basic integrity:', sessionId, problems);
+      throw new AppError('MANUAL_SETTLEMENT_INVALID', MANUAL_INVALID);
+    }
+
+    const supabase = await createClient();
+    const { error } = await supabase.rpc('close_session_manual', {
+      p_session_id: sessionId,
+      p_settlement: toSettlementPayload(manual),
+      p_note: note,
+    });
+    if (error !== null) throw mapDbError(error, 'Session manuell abschließen');
+
+    revalidateSession(sessionId);
+    return { discrepancyCents: manual.discrepancy };
   });
 }
 

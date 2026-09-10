@@ -25,12 +25,15 @@ vi.mock('@/lib/supabase/server', () => ({ createClient }));
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
-const { closeSession, previewSettlement, reopenSession } = await import('./close');
+const { closeSession, closeSessionManual, previewSettlement, reopenSession } = await import(
+  './close'
+);
 
 const SESSION = '33333333-3333-4333-8333-333333333333';
 const ALI = '11111111-1111-4111-8111-111111111111';
 const BEN = '22222222-2222-4222-8222-222222222222';
 const CAN = '44444444-4444-4444-8444-444444444444';
+const STRANGER = '55555555-5555-4555-8555-555555555555';
 
 type InputRow = {
   player_id: string;
@@ -408,6 +411,138 @@ describe('Fehler der Datenbank', () => {
     const result = await closeSession({ sessionId: SESSION });
     expect(result.ok).toBe(false);
     expect(callTo('close_session')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Manual override (WP11, docs/SPEC.md §6.1)
+// ---------------------------------------------------------------------------
+
+describe('closeSessionManual', () => {
+  const TV2_PARTS = [
+    { playerId: ALI, name: 'Ali', position: 0, cashIn: 10000, creditIn: 0, stack: 20000, payout: 0 },
+    { playerId: BEN, name: 'Ben', position: 1, cashIn: 10000, creditIn: 0, stack: 4000, payout: 0 },
+    { playerId: CAN, name: 'Can', position: 2, cashIn: 0, creditIn: 10000, stack: 6000, payout: 0 },
+  ];
+
+  /** The automatic base, hand-edited: extra `patch` overrides applied on top. */
+  function edited(patch: Partial<ReturnType<typeof computeSettlement>>) {
+    return { ...computeSettlement(TV2_PARTS), ...patch };
+  }
+
+  it('nur ein Admin darf manuell übersteuern', async () => {
+    setDb(TV2);
+    for (const role of ['viewer', 'editor'] as const) {
+      getCurrentUser.mockResolvedValue(asUser(role));
+      const result = await closeSessionManual({
+        sessionId: SESSION,
+        note: 'Bar anders verteilt',
+        settlement: edited({}),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('FORBIDDEN');
+    }
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('reicht die hand-edierten Zahlen unverändert durch (keine Neuberechnung)', async () => {
+    getCurrentUser.mockResolvedValue(asUser('admin'));
+    setDb(TV2);
+
+    // Deliberately „unstimmig“: Ali gets 0 € cash although the algorithm would
+    // give him 160 €, and a lonely transfer that does not match any residual.
+    const manual = edited({
+      lines: computeSettlement(TV2_PARTS).lines.map((line, index) =>
+        index === 0 ? { ...line, cashFromBox: 0 } : line,
+      ),
+      transfers: [{ fromPlayerId: CAN, toPlayerId: ALI, amount: 12345 }],
+    });
+
+    const result = await closeSessionManual({
+      sessionId: SESSION,
+      note: 'Bar am Tisch schon anders verteilt',
+      settlement: manual,
+    });
+    expect(result.ok).toBe(true);
+
+    const args = callTo('close_session_manual');
+    expect(args).not.toBeNull();
+    expect(args?.p_note).toBe('Bar am Tisch schon anders verteilt');
+    // Exactly what the admin sent, only flagged manual — nothing recomputed.
+    expect(args?.p_settlement).toEqual(toSettlementPayload({ ...manual, isManual: true }));
+    const payload = args?.p_settlement as { isManual: boolean; lines: { cashFromBox: number }[] };
+    expect(payload.isManual).toBe(true);
+    expect(payload.lines[0].cashFromBox).toBe(0);
+  });
+
+  it('sendet genau die drei Argumente der RPC', async () => {
+    getCurrentUser.mockResolvedValue(asUser('admin'));
+    setDb(TV2);
+
+    await closeSessionManual({ sessionId: SESSION, note: 'Grund', settlement: edited({}) });
+    expect(Object.keys(callTo('close_session_manual') ?? {}).sort()).toEqual([
+      'p_note',
+      'p_session_id',
+      'p_settlement',
+    ]);
+  });
+
+  it('lehnt eine Überweisung an einen Nicht-Teilnehmer ab, bevor geschrieben wird', async () => {
+    getCurrentUser.mockResolvedValue(asUser('admin'));
+    setDb(TV2);
+
+    const result = await closeSessionManual({
+      sessionId: SESSION,
+      note: 'Grund',
+      settlement: edited({ transfers: [{ fromPlayerId: STRANGER, toPlayerId: ALI, amount: 100 }] }),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('MANUAL_SETTLEMENT_INVALID');
+    expect(callTo('close_session_manual')).toBeNull();
+  });
+
+  it('lehnt Selbst-Überweisung und Betrag 0 ab', async () => {
+    getCurrentUser.mockResolvedValue(asUser('admin'));
+    setDb(TV2);
+
+    for (const transfer of [
+      { fromPlayerId: ALI, toPlayerId: ALI, amount: 100 },
+      { fromPlayerId: CAN, toPlayerId: ALI, amount: 0 },
+    ]) {
+      const result = await closeSessionManual({
+        sessionId: SESSION,
+        note: 'Grund',
+        settlement: edited({ transfers: [transfer] }),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('MANUAL_SETTLEMENT_INVALID');
+    }
+    expect(callTo('close_session_manual')).toBeNull();
+  });
+
+  it('verlangt eine Begründung von mindestens drei Zeichen', async () => {
+    getCurrentUser.mockResolvedValue(asUser('admin'));
+    setDb(TV2);
+
+    for (const note of ['', '  ', 'ok']) {
+      const result = await closeSessionManual({ sessionId: SESSION, note, settlement: edited({}) });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION');
+    }
+    expect(callTo('close_session_manual')).toBeNull();
+  });
+
+  it('übersetzt einen Datenbank-Fehler (SESSION_CLOSED) ins Deutsche', async () => {
+    getCurrentUser.mockResolvedValue(asUser('admin'));
+    setDb(TV2, dbError('SESSION_CLOSED'));
+
+    const result = await closeSessionManual({
+      sessionId: SESSION,
+      note: 'Grund',
+      settlement: edited({}),
+    });
+    if (result.ok) throw new Error('hätte scheitern müssen');
+    expect(result.error.code).toBe('SESSION_CLOSED');
   });
 });
 

@@ -26,10 +26,14 @@ export type ShareTextInput = {
 };
 
 export function buildShareText({ playedOn, name, settlement, names }: ShareTextInput): string {
-  const heading =
+  const baseHeading =
     name === null || name.trim() === ''
       ? `Poker-Kasse · ${formatPlayedOn(playedOn)}`
       : `Poker-Kasse · ${formatPlayedOn(playedOn)} · ${name.trim()}`;
+
+  // WP11: a hand-edited settlement says so, so the group chat knows the numbers
+  // are not the automatic ones (docs/SPEC.md §6.1).
+  const heading = settlement.isManual ? `${baseHeading}\n(manuell bearbeitet)` : baseHeading;
 
   const blocks = [
     heading,

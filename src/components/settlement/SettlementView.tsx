@@ -43,6 +43,13 @@ export function SettlementView({
         </p>
       ) : null}
 
+      {settlement.isManual ? (
+        <p className="rounded-xl bg-black/5 px-3 py-2 text-xs font-medium dark:bg-white/10">
+          Manuell bearbeitet — diese Abrechnung wurde von einem Admin von Hand gesetzt und nicht
+          automatisch berechnet.
+        </p>
+      ) : null}
+
       {/* Block 1 --------------------------------------------------------- */}
       <Block title="Aus der Kasse">
         {cashRows.length === 0 ? (
@@ -173,7 +180,9 @@ export function SettlementView({
         )}
       </Block>
 
-      <CalculationDetails settlement={settlement} names={names} />
+      {/* The „Rechenweg“ explains the three automatic stages; for a hand-edited
+          settlement those stages do not apply, so it is hidden (WP11). */}
+      {settlement.isManual ? null : <CalculationDetails settlement={settlement} names={names} />}
     </div>
   );
 }

@@ -55,6 +55,12 @@ export type SettlementPayload = {
   unallocatedCash: number;
   uncoveredClaims: number;
   uncoveredDebts: number;
+  /**
+   * `true` for a hand-edited settlement (WP11, docs/SPEC.md §6.1). `close_session`
+   * ignores this key and always stores `false`; only `close_session_manual` reads
+   * it and stores `settlements.is_manual`.
+   */
+  isManual: boolean;
 };
 
 /** The money columns of a stored settlement head. */
@@ -70,6 +76,7 @@ export type StoredSettlementHead = Pick<
   | 'unallocated_cash_cents'
   | 'uncovered_claims_cents'
   | 'uncovered_debts_cents'
+  | 'is_manual'
 >;
 
 /** The three tables of one frozen settlement, as they come out of the query. */
@@ -111,6 +118,7 @@ export function toSettlementPayload(result: FrozenSettlement): SettlementPayload
     unallocatedCash: result.unallocatedCash,
     uncoveredClaims: result.uncoveredClaims,
     uncoveredDebts: result.uncoveredDebts,
+    isManual: result.isManual,
   };
 }
 
@@ -128,6 +136,7 @@ export function fromSettlementPayload(payload: SettlementPayload): FrozenSettlem
     unallocatedCash: payload.unallocatedCash,
     uncoveredClaims: payload.uncoveredClaims,
     uncoveredDebts: payload.uncoveredDebts,
+    isManual: payload.isManual,
   };
 }
 
@@ -174,6 +183,7 @@ export function fromStoredRows(rows: StoredSettlementRows): FrozenSettlement {
     unallocatedCash: settlement.unallocated_cash_cents,
     uncoveredClaims: settlement.uncovered_claims_cents,
     uncoveredDebts: settlement.uncovered_debts_cents,
+    isManual: settlement.is_manual,
   };
 }
 
@@ -204,6 +214,7 @@ export function toStoredRows(
       unallocated_cash_cents: result.unallocatedCash,
       uncovered_claims_cents: result.uncoveredClaims,
       uncovered_debts_cents: result.uncoveredDebts,
+      is_manual: result.isManual,
     },
     lines: result.lines.map((line, index) => ({
       session_id: sessionId,
