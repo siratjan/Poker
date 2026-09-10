@@ -212,9 +212,15 @@ function FilterSelect({
         onChange={(event) => onChange(event.target.value === '' ? null : event.target.value)}
         className="min-h-[44px] w-full rounded-xl border border-black/15 bg-transparent px-3 text-base outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:border-white/20"
       >
-        <option value="">Alle</option>
+        <option value="" className="bg-[var(--background)] text-[var(--foreground)]">
+          Alle
+        </option>
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
+          <option
+            key={option.value}
+            value={option.value}
+            className="bg-[var(--background)] text-[var(--foreground)]"
+          >
             {option.label}
           </option>
         ))}

@@ -65,12 +65,15 @@ export default async function SessionsPage() {
 
       {mayEdit && sessions.length > 0 ? (
         <div
-          className="fixed inset-x-0 bottom-0 z-30 px-4"
+          // `pointer-events-none` so the transparent padding strip below the
+          // button — it overlaps the tab bar (higher z-index) — never swallows
+          // taps meant for the tabs; only the button itself takes clicks.
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4"
           // Sits above the tab bar, both of them above the home indicator
           // (WP9, step 5).
           style={{ paddingBottom: 'calc(var(--tabbar-height) + var(--safe-bottom) + 1rem)' }}
         >
-          <div className="mx-auto max-w-2xl">
+          <div className="pointer-events-auto mx-auto max-w-2xl">
             <Link
               href="/sessions/new"
               className={buttonClasses({ size: 'lg', className: 'w-full shadow-lg' })}

@@ -99,7 +99,11 @@ function AddForm() {
           className="min-h-[44px] rounded-xl border border-black/15 bg-transparent px-3 text-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:border-white/20"
         >
           {ROLES.map((value) => (
-            <option key={value} value={value}>
+            <option
+              key={value}
+              value={value}
+              className="bg-[var(--background)] text-[var(--foreground)]"
+            >
               {ROLE_LABELS[value]}
             </option>
           ))}
