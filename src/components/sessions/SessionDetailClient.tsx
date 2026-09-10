@@ -12,6 +12,7 @@ import {
   removeParticipant,
   updateCashOut,
 } from '@/actions/entries';
+import { deleteOpenSession } from '@/actions/sessions';
 import { CloseSessionPanel } from '@/components/sessions/CloseSessionPanel';
 import { ClosedSessionSection } from '@/components/sessions/ClosedSessionSection';
 import { HistoryList } from '@/components/sessions/HistoryList';
@@ -80,7 +81,8 @@ type SheetState =
   | { kind: 'payout'; playerId: string }
   | { kind: 'addParticipant' }
   | { kind: 'confirmRemove'; playerId: string }
-  | { kind: 'confirmDeleteEntry'; entry: SessionEntry };
+  | { kind: 'confirmDeleteEntry'; entry: SessionEntry }
+  | { kind: 'confirmDeleteSession' };
 
 export function SessionDetailClient({
   detail,
@@ -189,6 +191,24 @@ export function SessionDetailClient({
     }
     if (success !== undefined) showSuccess(success);
     refresh();
+    return true;
+  }
+
+  /**
+   * Deleting a whole session is admin-only and only possible while it is open
+   * and unsettled (RLS enforces that; the UI just hides the button otherwise).
+   * On success the session is gone, so we leave the page instead of refreshing
+   * it — a `router.refresh()` here would render a 404.
+   */
+  async function deleteSession(): Promise<boolean> {
+    const result = await deleteOpenSession(session.id);
+    if (!result.ok) {
+      showError(result.error.message);
+      refresh();
+      return false;
+    }
+    showSuccess('Session gelöscht');
+    router.push('/');
     return true;
   }
 
@@ -357,6 +377,21 @@ export function SessionDetailClient({
         />
       </div>
 
+      {isOpen && isAdmin ? (
+        <div className="flex flex-col gap-1 border-t border-black/10 pt-4 dark:border-white/10">
+          <button
+            type="button"
+            onClick={() => setSheet({ kind: 'confirmDeleteSession' })}
+            className="min-h-[44px] self-start text-sm font-medium text-red-600 dark:text-red-400"
+          >
+            Session löschen
+          </button>
+          <p className="text-xs opacity-60">
+            Nur solange die Session offen ist. Löscht sie mit allen Einträgen endgültig.
+          </p>
+        </div>
+      ) : null}
+
       {sheet.kind === 'actions' && selected !== null ? (
         <ParticipantActionsSheet
           participant={selected}
@@ -480,6 +515,17 @@ export function SessionDetailClient({
               'Eintrag gelöscht',
             )
           }
+          onClose={closeSheet}
+        />
+      ) : null}
+
+      {sheet.kind === 'confirmDeleteSession' ? (
+        <ConfirmDeleteSheet
+          title="Session löschen?"
+          description="Die ganze Session mit allen Buy-ins und Einträgen wird endgültig gelöscht. Das kann nicht rückgängig gemacht werden."
+          confirmLabel="Löschen"
+          pendingLabel="Löscht …"
+          onConfirm={deleteSession}
           onClose={closeSheet}
         />
       ) : null}
